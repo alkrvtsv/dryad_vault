@@ -16,7 +16,7 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd /root/dryad_bot
+            cd /root/dryad_vault
             git pull origin main
             ./venv/bin/pip install -r requirements.txt
-            systemctl restart dryad_bot
+            systemctl restart dryad_vault

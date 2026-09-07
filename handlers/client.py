@@ -22,7 +22,7 @@ async def handle_noop(callback: types.CallbackQuery):
 @router.message(CommandStart(deep_link=True))
 async def handle_deep_link(message: types.Message, command: CommandObject, state: FSMContext, bot: Bot):
     await state.clear()
-    await database.save_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
+    await database.save_user(message.from_user.id, message.from_user.username)
     
     code = command.args.strip()
     keyboard = keyboards.get_user_keyboard(message.from_user.id)
@@ -44,8 +44,8 @@ async def handle_deep_link(message: types.Message, command: CommandObject, state
 @router.message(CommandStart(), F.from_user.id != ADMIN_ID)
 async def handle_regular_start(message: types.Message, state: FSMContext):
     await state.clear()
-    await database.save_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
-    await message.answer(texts.CLIENT_START, reply_markup=keyboards.get_client_keyboard())
+    await database.save_user(message.from_user.id, message.from_user.username)
+    await message.answer(texts.CLIENT_START, reply_markup=keyboards.get_client_keyboard(), parse_mode=ParseMode.HTML)
 
 @router.message(F.text == texts.BUTTON_GET_VIDEO, F.from_user.id != ADMIN_ID)
 async def process_get_video_button(message: types.Message, state: FSMContext):
@@ -55,7 +55,7 @@ async def process_get_video_button(message: types.Message, state: FSMContext):
 @router.message(F.text == texts.BUTTON_HISTORY, F.from_user.id != ADMIN_ID)
 async def process_history_button(message: types.Message, state: FSMContext):
     await state.clear()
-    await database.save_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
+    await database.save_user(message.from_user.id, message.from_user.username)
     
     orders = await database.get_user_orders(message.from_user.id)
     if not orders:
@@ -92,7 +92,7 @@ async def handle_client_video_click(callback: types.CallbackQuery, bot: Bot):
 
 @router.message(OrderProcess.waiting_for_code, F.text, F.from_user.id != ADMIN_ID)
 async def process_code_input(message: types.Message, state: FSMContext, bot: Bot):
-    await database.save_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
+    await database.save_user(message.from_user.id, message.from_user.username)
     text = message.text.strip()
     
     if text == texts.BUTTON_GET_VIDEO:

@@ -9,7 +9,9 @@ BUTTON_CANCEL = "❌ Отмена"
 CLIENT_START = (
     "Привет! ✨\n\n"
     "Здесь ты можешь забрать своё персональное видео или пересмотреть "
-    "ролики из прошлых заказов. Выбирай нужное действие в меню:"
+    "ролики из прошлых заказов. Выбирай нужное действие в меню:\n\n"
+    "<i>Бот не собирает и не обрабатывает персональные данные, используя "
+    "только системный Telegram ID для привязки роликов.</i>"
 )
 
 ADMIN_START = (
@@ -48,7 +50,7 @@ VIDEO_LOADING = "Отправляю твоё видео, пару секунд..
 HISTORY_EMPTY = "У тебя пока нет сохранённых видео."
 CLIENT_HISTORY_TITLE = "🎬 <b>Твои видео:</b>\n\nВыбери ролик из списка ниже, чтобы посмотреть его:"
 
-CUSTOMERS_EMPTY = "😒 Список заказчиков пока пуст. Никто ещё не получал видео."
+CUSTOMERS_EMPTY = "Список заказчиков пока пуст. Никто ещё не получал видео."
 CUSTOMERS_TITLE = "👥 <b>Твои заказчики:</b>\n\nВыбери нужного, чтобы посмотреть его видео или обновить профиль:"
 
 CUSTOMER_NO_VIDEOS = "У этого заказчика не осталось сохранённых видео."
@@ -68,11 +70,12 @@ ADMIN_PROMPT_RENAME = "Напиши новое название для этог�
 ADMIN_RENAME_SUCCESS = "✅ Название видео успешно обновлено!"
 NEW_LINK_SUCCESS = "Новая ссылка создана!"
 
-def video_manage_text(title: str, code: str, name: str) -> str:
+def video_manage_text(title: str, code: str, user_id: int, username: str | None) -> str:
+    user_ref = f"@{username}" if username else f"ID: {user_id}"
     return (
         f"🎬 <b>Видео:</b> {title}\n"
         f"🔑 <b>Код:</b> <code>{code}</code>\n"
-        f"👤 <b>Заказчик:</b> {name}\n\n"
+        f"👤 <b>Заказчик:</b> {user_ref}\n\n"
         "Выбери действие с роликом:"
     )
 
@@ -96,19 +99,18 @@ def admin_new_link_created(code: str, link: str, title: str) -> str:
         "<i>(Ссылка одноразовая и активируется при переходе)</i>"
     )
 
-def admin_order_activated(code: str, name: str, username: str | None, user_id: int, title: str | None = None) -> str:
+def admin_order_activated(code: str, username: str | None, user_id: int, title: str | None = None) -> str:
     username_text = f"@{username}" if username else "нет"
     title_line = f"🎬 Видео: <b>{title}</b>\n" if title else ""
     return (
         "🔔 <b>Видео забрали!</b>\n\n"
         f"{title_line}"
         f"🔑 Код: <code>{code}</code>\n"
-        f"👤 Клиент: {name}\n"
         f"🌐 Юзернейм: {username_text}\n"
         f"🆔 ID: <code>{user_id}</code>"
     )
 
-def customer_details_title(name: str, username: str | None, user_id: int, orders_page: list, total_count: int, page: int, total_pages: int, start_idx: int) -> str:
+def customer_details_title(username: str | None, user_id: int, orders_page: list, total_count: int, page: int, total_pages: int, start_idx: int) -> str:
     username_text = f"@{username}" if username else "нет"
     lines = []
     for idx, (_, _, title) in enumerate(orders_page, start=start_idx):
@@ -117,9 +119,8 @@ def customer_details_title(name: str, username: str | None, user_id: int, orders
     videos_list_text = "\n".join(lines) if lines else "Нет видео"
     page_info = f" (Стр. {page}/{total_pages})" if total_pages > 1 else ""
     return (
-        f"👤 <b>Заказчик:</b> {name}\n"
-        f"🌐 Юзернейм: {username_text}\n"
         f"🆔 ID: <code>{user_id}</code>\n"
+        f"🌐 Юзернейм: {username_text}\n"
         f"🎬 Всего видео: {total_count}{page_info}\n\n"
         f"<b>Список видео:</b>\n{videos_list_text}\n\n"
         "Выбери видео ниже для управления:"

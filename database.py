@@ -16,7 +16,6 @@ async def init_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
-                full_name TEXT,
                 username TEXT
             )
         """)
@@ -26,15 +25,14 @@ async def init_db():
             pass
         await db.commit()
 
-async def save_user(user_id: int, full_name: str, username: str | None):
+async def save_user(user_id: int, username: str | None):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
-            INSERT INTO users (user_id, full_name, username)
-            VALUES (?, ?, ?)
+            INSERT INTO users (user_id, username)
+            VALUES (?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
-                full_name = excluded.full_name,
                 username = excluded.username
-        """, (user_id, full_name, username))
+        """, (user_id, username))
         await db.commit()
 
 async def create_order(file_id: str, title: str) -> str:
@@ -77,7 +75,7 @@ async def get_user_orders(user_id: int):
 async def get_customers_summary():
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("""
-            SELECT o.used_by, u.full_name, u.username, COUNT(o.code)
+            SELECT o.used_by, u.username, COUNT(o.code)
             FROM orders o
             LEFT JOIN users u ON o.used_by = u.user_id
             WHERE o.used_by IS NOT NULL
@@ -103,11 +101,11 @@ async def update_order_title(code: str, title: str):
 
 async def get_user_info(user_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT full_name, username FROM users WHERE user_id = ?", (user_id,))
+        cursor = await db.execute("SELECT username FROM users WHERE user_id = ?", (user_id,))
         row = await cursor.fetchone()
-        if row:
-            return row[0], row[1]
-        return f"Пользователь {user_id}", None
+        if row and row[0]:
+            return row[0]
+        return None
 
 async def delete_order_by_code(code: str):
     async with aiosqlite.connect(DB_NAME) as db:

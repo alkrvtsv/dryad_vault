@@ -41,7 +41,6 @@ async def send_protected_video(bot: Bot, chat_id: int, file_id: str, title: str 
 async def notify_admin(bot: Bot, code: str, user: types.User, title: str | None = None):
     msg = texts.admin_order_activated(
         code=code,
-        name=user.full_name,
         username=user.username,
         user_id=user.id,
         title=title
@@ -51,10 +50,8 @@ async def notify_admin(bot: Bot, code: str, user: types.User, title: str | None 
 async def sync_user_from_telegram(bot: Bot, user_id: int):
     try:
         chat = await bot.get_chat(user_id)
-        name_parts = [chat.first_name, chat.last_name]
-        full_name = " ".join([p for p in name_parts if p]) or "Пользователь"
         username = chat.username
-        await database.save_user(user_id, full_name, username)
-        return full_name, username, True
+        await database.save_user(user_id, username)
+        return username, True
     except Exception:
-        return None, None, False
+        return None, False

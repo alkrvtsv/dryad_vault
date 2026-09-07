@@ -46,13 +46,8 @@ def build_customers_keyboard(customers, page: int = 1):
     current_items = customers[start_idx:start_idx + PAGE_SIZE]
 
     inline_keyboard = []
-    for user_id, full_name, username, count in current_items:
-        if username:
-            display_name = f"@{username}"
-        elif full_name:
-            display_name = full_name
-        else:
-            display_name = f"ID: {user_id}"
+    for user_id, username, count in current_items:
+        display_name = f"@{username}" if username else f"ID: {user_id}"
         button_text = f"👤 {display_name} ({count} 🎬)"
         inline_keyboard.append([InlineKeyboardButton(text=button_text, callback_data=f"cust:{user_id}:1")])
 

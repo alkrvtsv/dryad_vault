@@ -29,7 +29,7 @@ class AdminRenameVideo(StatesGroup):
 @router.message(CommandStart())
 async def handle_admin_start(message: types.Message, state: FSMContext):
     await state.clear()
-    await database.save_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
+    await database.save_user(message.from_user.id, message.from_user.username)
     await message.answer(texts.ADMIN_START, reply_markup=keyboards.get_admin_keyboard())
 
 @router.message(F.text == texts.BUTTON_CANCEL)
@@ -172,9 +172,9 @@ async def handle_customer_click(callback: types.CallbackQuery):
         await callback.answer()
         return
     
-    full_name, username = await database.get_user_info(user_id)
+    username = await database.get_user_info(user_id)
     markup, current_items, total_pages, actual_page, start_idx = keyboards.build_customer_videos_keyboard(orders, user_id, page)
-    text = texts.customer_details_title(full_name, username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
+    text = texts.customer_details_title(username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
     
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
     await callback.answer()
@@ -194,9 +194,9 @@ async def handle_customer_videos_pagination(callback: types.CallbackQuery):
         await callback.answer()
         return
     
-    full_name, username = await database.get_user_info(user_id)
+    username = await database.get_user_info(user_id)
     markup, current_items, total_pages, actual_page, start_idx = keyboards.build_customer_videos_keyboard(orders, user_id, page)
-    text = texts.customer_details_title(full_name, username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
+    text = texts.customer_details_title(username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
     
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
     await callback.answer()
@@ -214,10 +214,10 @@ async def handle_video_options(callback: types.CallbackQuery):
     
     _, _, _, title = order
     video_title = title if title else "Без названия"
-    full_name, _ = await database.get_user_info(user_id)
+    username = await database.get_user_info(user_id)
     
     markup = keyboards.build_video_actions_keyboard(code, user_id, page)
-    text = texts.video_manage_text(video_title, code, full_name)
+    text = texts.video_manage_text(video_title, code, user_id, username)
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
     await callback.answer()
 
@@ -267,9 +267,9 @@ async def process_rename_video_title(message: types.Message, state: FSMContext):
     await message.answer(texts.ADMIN_RENAME_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
     
     orders = await database.get_customer_orders(user_id)
-    full_name, username = await database.get_user_info(user_id)
+    username = await database.get_user_info(user_id)
     markup, current_items, total_pages, actual_page, start_idx = keyboards.build_customer_videos_keyboard(orders, user_id, page)
-    text = texts.customer_details_title(full_name, username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
+    text = texts.customer_details_title(username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
     await message.answer(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 @router.callback_query(F.data.startswith("refresh:"))
@@ -278,7 +278,7 @@ async def handle_refresh_customer(callback: types.CallbackQuery, bot: Bot):
     user_id = int(user_id_str)
     page = int(page_str)
     
-    full_name, username, success = await services.sync_user_from_telegram(bot, user_id)
+    username, success = await services.sync_user_from_telegram(bot, user_id)
     if not success:
         await callback.answer(texts.USER_UPDATE_FAILED, show_alert=True)
         return
@@ -286,7 +286,7 @@ async def handle_refresh_customer(callback: types.CallbackQuery, bot: Bot):
     await callback.answer(texts.USER_UPDATED_SUCCESS)
     orders = await database.get_customer_orders(user_id)
     markup, current_items, total_pages, actual_page, start_idx = keyboards.build_customer_videos_keyboard(orders, user_id, page)
-    text = texts.customer_details_title(full_name, username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
+    text = texts.customer_details_title(username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 @router.callback_query(F.data.startswith("del:"))
@@ -306,7 +306,7 @@ async def handle_delete_video_click(callback: types.CallbackQuery):
         await callback.message.edit_text(texts.CUSTOMER_NO_VIDEOS, reply_markup=markup)
         return
     
-    full_name, username = await database.get_user_info(user_id)
+    username = await database.get_user_info(user_id)
     markup, current_items, total_pages, actual_page, start_idx = keyboards.build_customer_videos_keyboard(orders, user_id, page)
-    text = texts.customer_details_title(full_name, username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
+    text = texts.customer_details_title(username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)

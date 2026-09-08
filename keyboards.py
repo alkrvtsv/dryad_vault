@@ -8,7 +8,8 @@ def get_client_keyboard():
             [KeyboardButton(text=texts.BUTTON_GET_VIDEO)],
             [KeyboardButton(text=texts.BUTTON_HISTORY)]
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
+        is_persistent=True
     )
 
 def get_admin_keyboard():
@@ -18,13 +19,15 @@ def get_admin_keyboard():
             [KeyboardButton(text=texts.BUTTON_ASSIGN_DIRECT)],
             [KeyboardButton(text=texts.BUTTON_CUSTOMERS_LIST)]
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
+        is_persistent=True
     )
 
 def get_cancel_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=texts.BUTTON_CANCEL)]],
-        resize_keyboard=True
+        resize_keyboard=True,
+        is_persistent=True
     )
 
 def get_user_keyboard(user_id: int):

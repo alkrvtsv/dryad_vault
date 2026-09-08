@@ -1,5 +1,5 @@
 from aiogram import Router, F, types, Bot
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ParseMode
@@ -32,6 +32,7 @@ async def handle_admin_start(message: types.Message, state: FSMContext, bot: Bot
     await services.register_or_update_user(bot, message.from_user)
     await message.answer(texts.ADMIN_START, reply_markup=keyboards.get_admin_keyboard())
 
+@router.message(Command("cancel"))
 @router.message(F.text == texts.BUTTON_CANCEL)
 async def process_admin_cancel(message: types.Message, state: FSMContext):
     await state.clear()
@@ -129,6 +130,7 @@ async def process_upload_title(message: types.Message, state: FSMContext, bot: B
     reply_text = texts.admin_video_saved(code, deep_link, title)
     await message.reply(reply_text, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
 
+@router.message(Command("customers"))
 @router.message(F.text == texts.BUTTON_CUSTOMERS_LIST)
 async def process_admin_customers_list(message: types.Message, state: FSMContext):
     await state.clear()

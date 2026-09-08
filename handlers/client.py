@@ -1,5 +1,5 @@
 from aiogram import Router, F, types, Bot
-from aiogram.filters import CommandStart, CommandObject, Command
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ParseMode
@@ -36,7 +36,7 @@ async def handle_deep_link(message: types.Message, command: CommandObject, state
         return
         
     await message.answer(texts.VIDEO_LOADING, reply_markup=keyboard)
-    await services.send_protected_video(bot, message.chat.id, file_id, title)
+    await services.send_protected_video(bot, message.chat.id, file_id, title, reply_markup=keyboard)
 
     user_ref = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
     video_title = title or "Без названия"
@@ -53,7 +53,6 @@ async def handle_regular_start(message: types.Message, state: FSMContext, bot: B
     await services.register_or_update_user(bot, message.from_user)
     await message.answer(texts.CLIENT_START, reply_markup=keyboards.get_client_keyboard(), parse_mode=ParseMode.HTML)
 
-@router.message(Command("history"), F.from_user.id != ADMIN_ID)
 @router.message(F.text == texts.BUTTON_HISTORY, F.from_user.id != ADMIN_ID)
 async def process_history_button(message: types.Message, state: FSMContext, bot: Bot):
     await state.clear()
@@ -67,7 +66,6 @@ async def process_history_button(message: types.Message, state: FSMContext, bot:
     markup = keyboards.build_client_history_keyboard(orders, page=1)
     await message.answer(texts.CLIENT_HISTORY_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
 
-@router.message(Command("get"), F.from_user.id != ADMIN_ID)
 @router.message(F.text == texts.BUTTON_GET_VIDEO, F.from_user.id != ADMIN_ID)
 async def process_get_video_button(message: types.Message, state: FSMContext):
     await state.set_state(OrderProcess.waiting_for_code)
@@ -96,18 +94,25 @@ async def handle_client_video_click(callback: types.CallbackQuery, bot: Bot):
     
     _, file_id, _, title = order
     await callback.answer()
-    await services.send_protected_video(bot, callback.message.chat.id, file_id, title)
+    # Восстанавливаем клавиатуру вместе с роликом
+    await services.send_protected_video(
+        bot,
+        callback.message.chat.id,
+        file_id,
+        title,
+        reply_markup=keyboards.get_client_keyboard()
+    )
 
 @router.message(OrderProcess.waiting_for_code, F.text, F.from_user.id != ADMIN_ID)
 async def process_code_input(message: types.Message, state: FSMContext, bot: Bot):
     await services.register_or_update_user(bot, message.from_user)
     text = message.text.strip()
     
-    if text == texts.BUTTON_GET_VIDEO or text == "/get":
+    if text == texts.BUTTON_GET_VIDEO:
         await message.answer(texts.CLIENT_ASK_CODE, reply_markup=keyboards.get_client_keyboard())
         return
         
-    if text == texts.BUTTON_HISTORY or text == "/history":
+    if text == texts.BUTTON_HISTORY:
         await process_history_button(message, state, bot)
         return
 
@@ -123,7 +128,13 @@ async def process_code_input(message: types.Message, state: FSMContext, bot: Bot
         return
     
     await message.answer(texts.VIDEO_LOADING, reply_markup=keyboards.get_client_keyboard())
-    await services.send_protected_video(bot, message.chat.id, file_id, title)
+    await services.send_protected_video(
+        bot,
+        message.chat.id,
+        file_id,
+        title,
+        reply_markup=keyboards.get_client_keyboard()
+    )
 
     user_ref = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
     video_title = title or "Без названия"

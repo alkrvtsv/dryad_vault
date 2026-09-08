@@ -19,7 +19,6 @@ def extract_video_title(message: types.Message) -> str | None:
     return None
 
 async def backup_database(bot: Bot, description: str):
-    """Отправляет файл базы данных в канал-архив с описанием изменения."""
     if not ARCHIVE_CHANNEL_ID or not os.path.exists(DB_NAME):
         return
         
@@ -42,7 +41,6 @@ async def backup_database(bot: Bot, description: str):
         logging.error(f"Не удалось отправить бэкап базы данных: {e}")
 
 async def register_or_update_user(bot: Bot, user: types.User):
-    """Сохраняет пользователя и инициирует бэкап только при наличии изменений."""
     status = await database.save_user(user.id, user.username)
     user_ref = f"@{user.username}" if user.username else f"ID: {user.id}"
     
@@ -66,13 +64,21 @@ async def backup_and_get_file_id(bot: Bot, file_id: str, title: str | None = Non
     except Exception:
         return file_id
 
-async def send_protected_video(bot: Bot, chat_id: int, file_id: str, title: str | None = None):
+async def send_protected_video(
+    bot: Bot,
+    chat_id: int,
+    file_id: str,
+    title: str | None = None,
+    reply_markup=None
+):
+    """Отправляет защищенное видео и прикрепляет актуальную клавиатуру."""
     await bot.send_video(
         chat_id=chat_id,
         video=file_id,
         caption=texts.video_caption(title),
         protect_content=True,
-        parse_mode=ParseMode.HTML
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
     )
 
 async def notify_admin(bot: Bot, code: str, user: types.User, title: str | None = None):

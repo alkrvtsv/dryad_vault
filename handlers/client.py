@@ -22,7 +22,7 @@ async def handle_noop(callback: types.CallbackQuery):
 @router.message(CommandStart(deep_link=True))
 async def handle_deep_link(message: types.Message, command: CommandObject, state: FSMContext, bot: Bot):
     await state.clear()
-    await database.save_user(message.from_user.id, message.from_user.username)
+    await services.register_or_update_user(bot, message.from_user)
     
     code = command.args.strip()
     keyboard = keyboards.get_user_keyboard(message.from_user.id)
@@ -35,17 +35,22 @@ async def handle_deep_link(message: types.Message, command: CommandObject, state
         await message.answer(texts.ERR_USED_BY_OTHER, reply_markup=keyboard)
         return
         
-    # При SUCCESS или ALREADY_OWNED ролик отдается без дублирования записи в истории
     await message.answer(texts.VIDEO_LOADING, reply_markup=keyboard)
     await services.send_protected_video(bot, message.chat.id, file_id, title)
 
+    user_ref = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
+    video_title = title or "Без названия"
+
     if status == "SUCCESS":
+        await services.backup_database(bot, f"Заказчик {user_ref} активировал ссылку (видео «{video_title}», код: <code>{code}</code>)")
         await services.notify_admin(bot, code, message.from_user, title)
+    elif status == "DUPLICATE_REMOVED":
+        await services.backup_database(bot, f"Удален лишний временный код <code>{code}</code> (видео «{video_title}» уже есть у {user_ref})")
 
 @router.message(CommandStart(), F.from_user.id != ADMIN_ID)
-async def handle_regular_start(message: types.Message, state: FSMContext):
+async def handle_regular_start(message: types.Message, state: FSMContext, bot: Bot):
     await state.clear()
-    await database.save_user(message.from_user.id, message.from_user.username)
+    await services.register_or_update_user(bot, message.from_user)
     await message.answer(texts.CLIENT_START, reply_markup=keyboards.get_client_keyboard(), parse_mode=ParseMode.HTML)
 
 @router.message(F.text == texts.BUTTON_GET_VIDEO, F.from_user.id != ADMIN_ID)
@@ -54,9 +59,9 @@ async def process_get_video_button(message: types.Message, state: FSMContext):
     await message.answer(texts.CLIENT_ASK_CODE)
 
 @router.message(F.text == texts.BUTTON_HISTORY, F.from_user.id != ADMIN_ID)
-async def process_history_button(message: types.Message, state: FSMContext):
+async def process_history_button(message: types.Message, state: FSMContext, bot: Bot):
     await state.clear()
-    await database.save_user(message.from_user.id, message.from_user.username)
+    await services.register_or_update_user(bot, message.from_user)
     
     orders = await database.get_user_orders(message.from_user.id)
     if not orders:
@@ -93,7 +98,7 @@ async def handle_client_video_click(callback: types.CallbackQuery, bot: Bot):
 
 @router.message(OrderProcess.waiting_for_code, F.text, F.from_user.id != ADMIN_ID)
 async def process_code_input(message: types.Message, state: FSMContext, bot: Bot):
-    await database.save_user(message.from_user.id, message.from_user.username)
+    await services.register_or_update_user(bot, message.from_user)
     text = message.text.strip()
     
     if text == texts.BUTTON_GET_VIDEO:
@@ -101,7 +106,7 @@ async def process_code_input(message: types.Message, state: FSMContext, bot: Bot
         return
         
     if text == texts.BUTTON_HISTORY:
-        await process_history_button(message, state)
+        await process_history_button(message, state, bot)
         return
 
     file_id, title, status = await database.redeem_code(text, message.from_user.id)
@@ -115,9 +120,14 @@ async def process_code_input(message: types.Message, state: FSMContext, bot: Bot
         await message.answer(texts.ERR_USED_BY_OTHER, reply_markup=keyboards.get_client_keyboard())
         return
     
-    # Отправляем видео как при первичном вводе, так и при повторном
     await message.answer(texts.VIDEO_LOADING, reply_markup=keyboards.get_client_keyboard())
     await services.send_protected_video(bot, message.chat.id, file_id, title)
 
+    user_ref = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
+    video_title = title or "Без названия"
+
     if status == "SUCCESS":
+        await services.backup_database(bot, f"Заказчик {user_ref} ввёл код вручную (видео «{video_title}», код: <code>{text}</code>)")
         await services.notify_admin(bot, text, message.from_user, title)
+    elif status == "DUPLICATE_REMOVED":
+        await services.backup_database(bot, f"Удален лишний временный код <code>{text}</code> (видео «{video_title}» уже есть у {user_ref})")

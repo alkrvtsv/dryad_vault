@@ -1,9 +1,13 @@
 import os
+import logging
+from datetime import datetime
 from aiogram import Bot, types
 from aiogram.enums import ParseMode
+from aiogram.types import FSInputFile
+
 import database
 import texts
-from config import ADMIN_ID, ARCHIVE_CHANNEL_ID
+from config import ADMIN_ID, ARCHIVE_CHANNEL_ID, DB_NAME
 
 def extract_video_title(message: types.Message) -> str | None:
     if message.caption and message.caption.strip():
@@ -13,6 +17,39 @@ def extract_video_title(message: types.Message) -> str | None:
         if name.strip():
             return name.strip()
     return None
+
+async def backup_database(bot: Bot, description: str):
+    """Отправляет файл базы данных в канал-архив с описанием изменения."""
+    if not ARCHIVE_CHANNEL_ID or not os.path.exists(DB_NAME):
+        return
+        
+    now_str = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    caption = (
+        f"💾 <b>Резервная копия базы данных</b>\n\n"
+        f"📌 <b>Действие:</b> {description}\n"
+        f"🕒 <b>Время:</b> <code>{now_str}</code>"
+    )
+    try:
+        doc = FSInputFile(DB_NAME, filename=f"asmr_orders_{file_timestamp}.db")
+        await bot.send_document(
+            chat_id=ARCHIVE_CHANNEL_ID,
+            document=doc,
+            caption=caption,
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        logging.error(f"Не удалось отправить бэкап базы данных: {e}")
+
+async def register_or_update_user(bot: Bot, user: types.User):
+    """Сохраняет пользователя и инициирует бэкап только при наличии изменений."""
+    status = await database.save_user(user.id, user.username)
+    user_ref = f"@{user.username}" if user.username else f"ID: {user.id}"
+    
+    if status == "NEW":
+        await backup_database(bot, f"Новый заказчик добавлен в базу: {user_ref} (ID: <code>{user.id}</code>)")
+    elif status == "UPDATED":
+        await backup_database(bot, f"Обновлен юзернейм заказчика: {user_ref} (ID: <code>{user.id}</code>)")
 
 async def backup_and_get_file_id(bot: Bot, file_id: str, title: str | None = None) -> str:
     if not ARCHIVE_CHANNEL_ID:
@@ -51,7 +88,10 @@ async def sync_user_from_telegram(bot: Bot, user_id: int):
     try:
         chat = await bot.get_chat(user_id)
         username = chat.username
-        await database.save_user(user_id, username)
+        status = await database.save_user(user_id, username)
+        if status in ("NEW", "UPDATED"):
+            user_ref = f"@{username}" if username else "нет"
+            await backup_database(bot, f"Ручная синхронизация заказчика: {user_ref} (ID: <code>{user_id}</code>)")
         return username, True
     except Exception:
         return None, False

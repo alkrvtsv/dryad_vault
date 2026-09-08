@@ -27,9 +27,9 @@ class AdminRenameVideo(StatesGroup):
     waiting_for_title = State()
 
 @router.message(CommandStart())
-async def handle_admin_start(message: types.Message, state: FSMContext):
+async def handle_admin_start(message: types.Message, state: FSMContext, bot: Bot):
     await state.clear()
-    await database.save_user(message.from_user.id, message.from_user.username)
+    await services.register_or_update_user(bot, message.from_user)
     await message.answer(texts.ADMIN_START, reply_markup=keyboards.get_admin_keyboard())
 
 @router.message(F.text == texts.BUTTON_CANCEL)
@@ -65,11 +65,14 @@ async def process_admin_target_video(message: types.Message, state: FSMContext, 
     file_id = message.video.file_id
     title = services.extract_video_title(message)
     data = await state.get_data()
+    target_id = data["target_user_id"]
     
     if title:
         saved_file_id = await services.backup_and_get_file_id(bot, file_id, title)
-        await database.create_direct_order(saved_file_id, data["target_user_id"], title)
+        _, is_new = await database.create_direct_order(saved_file_id, target_id, title)
         await state.clear()
+        if is_new:
+            await services.backup_database(bot, f"Видео «{title}» напрямую привязано к заказчику ID: <code>{target_id}</code>")
         await message.reply(texts.ADMIN_DIRECT_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
     else:
         await state.update_data(file_id=file_id)
@@ -80,9 +83,12 @@ async def process_admin_target_video(message: types.Message, state: FSMContext, 
 async def process_admin_target_title(message: types.Message, state: FSMContext, bot: Bot):
     title = message.text.strip()
     data = await state.get_data()
+    target_id = data["target_user_id"]
     saved_file_id = await services.backup_and_get_file_id(bot, data["file_id"], title)
-    await database.create_direct_order(saved_file_id, data["target_user_id"], title)
+    _, is_new = await database.create_direct_order(saved_file_id, target_id, title)
     await state.clear()
+    if is_new:
+        await services.backup_database(bot, f"Видео «{title}» напрямую привязано к заказчику ID: <code>{target_id}</code>")
     await message.reply(texts.ADMIN_DIRECT_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
 
 @router.message(AdminDirectAssign.waiting_for_video)
@@ -97,6 +103,8 @@ async def handle_video_upload(message: types.Message, state: FSMContext, bot: Bo
     if title:
         saved_file_id = await services.backup_and_get_file_id(bot, file_id, title)
         code = await database.create_order(saved_file_id, title)
+        await services.backup_database(bot, f"Создана ссылка на видео «{title}» (код: <code>{code}</code>)")
+        
         bot_info = await bot.get_me()
         deep_link = f"https://t.me/{bot_info.username}?start={code}"
         reply_text = texts.admin_video_saved(code, deep_link, title)
@@ -115,6 +123,7 @@ async def process_upload_title(message: types.Message, state: FSMContext, bot: B
     code = await database.create_order(saved_file_id, title)
     await state.clear()
     
+    await services.backup_database(bot, f"Создана ссылка на видео «{title}» (код: <code>{code}</code>)")
     bot_info = await bot.get_me()
     deep_link = f"https://t.me/{bot_info.username}?start={code}"
     reply_text = texts.admin_video_saved(code, deep_link, title)
@@ -233,6 +242,8 @@ async def handle_create_new_link(callback: types.CallbackQuery, bot: Bot):
     video_title = title if title else "Без названия"
     new_code = await database.create_order(file_id, video_title)
     
+    await services.backup_database(bot, f"Создана новая ссылка для видео «{video_title}» (код: <code>{new_code}</code>)")
+    
     bot_info = await bot.get_me()
     deep_link = f"https://t.me/{bot_info.username}?start={new_code}"
     
@@ -254,7 +265,7 @@ async def handle_rename_video_start(callback: types.CallbackQuery, state: FSMCon
     await callback.answer()
 
 @router.message(AdminRenameVideo.waiting_for_title, F.text)
-async def process_rename_video_title(message: types.Message, state: FSMContext):
+async def process_rename_video_title(message: types.Message, state: FSMContext, bot: Bot):
     new_title = message.text.strip()
     data = await state.get_data()
     code = data["code"]
@@ -264,6 +275,7 @@ async def process_rename_video_title(message: types.Message, state: FSMContext):
     await database.update_order_title(code, new_title)
     await state.clear()
     
+    await services.backup_database(bot, f"Переименовано видео (код: <code>{code}</code>) ➔ «{new_title}»")
     await message.answer(texts.ADMIN_RENAME_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
     
     orders = await database.get_customer_orders(user_id)
@@ -290,12 +302,13 @@ async def handle_refresh_customer(callback: types.CallbackQuery, bot: Bot):
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 @router.callback_query(F.data.startswith("del:"))
-async def handle_delete_video_click(callback: types.CallbackQuery):
+async def handle_delete_video_click(callback: types.CallbackQuery, bot: Bot):
     _, code, user_id_str, page_str = callback.data.split(":")
     user_id = int(user_id_str)
     page = int(page_str)
     
     await database.delete_order_by_code(code)
+    await services.backup_database(bot, f"Удалено видео (код: <code>{code}</code>) у заказчика ID: <code>{user_id}</code>")
     await callback.answer(texts.VIDEO_DELETED_SUCCESS)
     
     orders = await database.get_customer_orders(user_id)

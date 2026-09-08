@@ -25,15 +25,20 @@ async def init_db():
             pass
         await db.commit()
 
-async def save_user(user_id: int, username: str | None):
+async def save_user(user_id: int, username: str | None) -> str:
+    """Возвращает 'NEW', 'UPDATED' или 'UNCHANGED'."""
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-            INSERT INTO users (user_id, username)
-            VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                username = excluded.username
-        """, (user_id, username))
-        await db.commit()
+        cursor = await db.execute("SELECT username FROM users WHERE user_id = ?", (user_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            await db.execute("INSERT INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
+            await db.commit()
+            return "NEW"
+        elif row[0] != username:
+            await db.execute("UPDATE users SET username = ? WHERE user_id = ?", (username, user_id))
+            await db.commit()
+            return "UPDATED"
+        return "UNCHANGED"
 
 async def create_order(file_id: str, title: str) -> str:
     code = secrets.token_urlsafe(8)
@@ -42,16 +47,16 @@ async def create_order(file_id: str, title: str) -> str:
         await db.commit()
     return code
 
-async def create_direct_order(file_id: str, user_id: int, title: str) -> str:
+async def create_direct_order(file_id: str, user_id: int, title: str) -> tuple[str, bool]:
+    """Возвращает (code, is_new)."""
     async with aiosqlite.connect(DB_NAME) as db:
-        # Проверка: если у пользователя уже привязано это видео, не создаем дубликат
         cursor = await db.execute(
             "SELECT code FROM orders WHERE used_by = ? AND file_id = ? LIMIT 1",
             (user_id, file_id)
         )
         existing = await cursor.fetchone()
         if existing:
-            return existing[0]
+            return existing[0], False
 
         code = secrets.token_urlsafe(8)
         await db.execute(
@@ -59,7 +64,7 @@ async def create_direct_order(file_id: str, user_id: int, title: str) -> str:
             (code, file_id, user_id, title)
         )
         await db.commit()
-        return code
+        return code, True
 
 async def redeem_code(code: str, user_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -75,7 +80,6 @@ async def redeem_code(code: str, user_id: int):
                 return file_id, title, "ALREADY_OWNED"
             return None, None, "USED_BY_OTHER"
 
-        # Проверяем, есть ли уже у этого пользователя видео с таким file_id
         existing_cursor = await db.execute(
             "SELECT code, title FROM orders WHERE used_by = ? AND file_id = ? LIMIT 1",
             (user_id, file_id)
@@ -83,11 +87,10 @@ async def redeem_code(code: str, user_id: int):
         existing_order = await existing_cursor.fetchone()
 
         if existing_order:
-            # Видео уже есть в коллекции клиента: удаляем дублирующую временную запись
             await db.execute("DELETE FROM orders WHERE code = ?", (code,))
             await db.commit()
             resolved_title = title or existing_order[1]
-            return file_id, resolved_title, "ALREADY_OWNED"
+            return file_id, resolved_title, "DUPLICATE_REMOVED"
 
         await db.execute("UPDATE orders SET is_used = 1, used_by = ? WHERE code = ?", (user_id, code))
         await db.commit()

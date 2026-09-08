@@ -35,6 +35,7 @@ async def handle_deep_link(message: types.Message, command: CommandObject, state
         await message.answer(texts.ERR_USED_BY_OTHER, reply_markup=keyboard)
         return
         
+    # При SUCCESS или ALREADY_OWNED ролик отдается без дублирования записи в истории
     await message.answer(texts.VIDEO_LOADING, reply_markup=keyboard)
     await services.send_protected_video(bot, message.chat.id, file_id, title)
 
@@ -114,6 +115,7 @@ async def process_code_input(message: types.Message, state: FSMContext, bot: Bot
         await message.answer(texts.ERR_USED_BY_OTHER, reply_markup=keyboards.get_client_keyboard())
         return
     
+    # Отправляем видео как при первичном вводе, так и при повторном
     await message.answer(texts.VIDEO_LOADING, reply_markup=keyboards.get_client_keyboard())
     await services.send_protected_video(bot, message.chat.id, file_id, title)
 

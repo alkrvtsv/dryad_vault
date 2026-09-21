@@ -56,6 +56,7 @@ CUSTOMERS_TITLE = "👥 <b>Твои заказчики:</b>\n\nВыбери ну
 CUSTOMER_NO_MEDIA = "У этого заказчика не осталось сохранённых материалов."
 MEDIA_DELETED_SUCCESS = "Материал удален!"
 
+BUTTON_VIEW_MEDIA = "▶️ Посмотреть в чате"
 BUTTON_NEW_LINK = "🔗 Создать новую ссылку"
 BUTTON_REFRESH_USER = "🔄 Обновить данные"
 BUTTON_BACK_CUSTOMERS = "◀️ Назад к заказчикам"

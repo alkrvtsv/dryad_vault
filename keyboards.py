@@ -91,6 +91,7 @@ def build_customer_videos_keyboard(orders, user_id: int, page: int = 1):
 
 def build_video_actions_keyboard(code: str, user_id: int, page: int):
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=texts.BUTTON_VIEW_MEDIA, callback_data=f"view:{code}")],
         [InlineKeyboardButton(text=texts.BUTTON_NEW_LINK, callback_data=f"newlink:{code}:{user_id}:{page}")],
         [InlineKeyboardButton(text=texts.BUTTON_RENAME_MEDIA, callback_data=f"ren:{code}:{user_id}:{page}")],
         [InlineKeyboardButton(text=texts.BUTTON_DELETE_CONFIRM, callback_data=f"del:{code}:{user_id}:{page}")],

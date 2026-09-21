@@ -9,14 +9,25 @@ import database
 import texts
 from config import ADMIN_ID, ARCHIVE_CHANNEL_ID, DB_NAME
 
-def extract_video_title(message: types.Message) -> str | None:
-    if message.caption and message.caption.strip():
-        return message.caption.strip()
-    if message.video and message.video.file_name:
-        name, _ = os.path.splitext(message.video.file_name)
-        if name.strip():
-            return name.strip()
-    return None
+def extract_media_info(message: types.Message) -> tuple[str, str, str | None]:
+    """Возвращает (file_id, media_type, title)."""
+    if message.video:
+        file_id = message.video.file_id
+        media_type = "video"
+        title = None
+        if message.caption and message.caption.strip():
+            title = message.caption.strip()
+        elif message.video.file_name:
+            name, _ = os.path.splitext(message.video.file_name)
+            if name.strip():
+                title = name.strip()
+        return file_id, media_type, title
+    elif message.photo:
+        file_id = message.photo[-1].file_id  # наибольшее разрешение
+        media_type = "photo"
+        title = message.caption.strip() if message.caption and message.caption.strip() else None
+        return file_id, media_type, title
+    raise ValueError("Message contains neither video nor photo")
 
 async def backup_database(bot: Bot, description: str):
     if not ARCHIVE_CHANNEL_ID or not os.path.exists(DB_NAME):
@@ -49,44 +60,65 @@ async def register_or_update_user(bot: Bot, user: types.User):
     elif status == "UPDATED":
         await backup_database(bot, f"Обновлен юзернейм заказчика: {user_ref} (ID: <code>{user.id}</code>)")
 
-async def backup_and_get_file_id(bot: Bot, file_id: str, title: str | None = None) -> str:
+async def backup_and_get_file_id(bot: Bot, file_id: str, media_type: str, title: str | None = None) -> str:
     if not ARCHIVE_CHANNEL_ID:
         return file_id
     try:
-        caption = f"📦 <b>{title}</b>" if title else "📦 <b>Видеоархив</b>"
-        archived_msg = await bot.send_video(
-            chat_id=ARCHIVE_CHANNEL_ID,
-            video=file_id,
-            caption=caption,
-            parse_mode=ParseMode.HTML
-        )
-        return archived_msg.video.file_id
+        icon = "📦 🎬" if media_type == "video" else "📦 🖼"
+        caption = f"{icon} <b>{title}</b>" if title else f"{icon} <b>Архив</b>"
+        if media_type == "video":
+            archived_msg = await bot.send_video(
+                chat_id=ARCHIVE_CHANNEL_ID,
+                video=file_id,
+                caption=caption,
+                parse_mode=ParseMode.HTML
+            )
+            return archived_msg.video.file_id
+        else:
+            archived_msg = await bot.send_photo(
+                chat_id=ARCHIVE_CHANNEL_ID,
+                photo=file_id,
+                caption=caption,
+                parse_mode=ParseMode.HTML
+            )
+            return archived_msg.photo[-1].file_id
     except Exception:
         return file_id
 
-async def send_protected_video(
+async def send_protected_media(
     bot: Bot,
     chat_id: int,
     file_id: str,
+    media_type: str = "video",
     title: str | None = None,
     reply_markup=None
 ):
-    """Отправляет защищенное видео и прикрепляет актуальную клавиатуру."""
-    await bot.send_video(
-        chat_id=chat_id,
-        video=file_id,
-        caption=texts.video_caption(title),
-        protect_content=True,
-        parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup
-    )
+    if media_type == "video":
+        await bot.send_video(
+            chat_id=chat_id,
+            video=file_id,
+            caption=texts.media_caption(title),
+            protect_content=True,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+    else:
+        await bot.send_photo(
+            chat_id=chat_id,
+            photo=file_id,
+            caption=texts.media_caption(title),
+            protect_content=True,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
 
-async def notify_admin(bot: Bot, code: str, user: types.User, title: str | None = None):
+async def notify_admin(bot: Bot, code: str, user: types.User, title: str | None = None, media_type: str = "video"):
     msg = texts.admin_order_activated(
         code=code,
         username=user.username,
         user_id=user.id,
-        title=title
+        title=title,
+        media_type=media_type
     )
     await bot.send_message(chat_id=ADMIN_ID, text=msg, parse_mode=ParseMode.HTML)
 

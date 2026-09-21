@@ -1,5 +1,5 @@
 from aiogram import Router, F, types, Bot
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ParseMode
@@ -20,10 +20,10 @@ class AdminUpload(StatesGroup):
 
 class AdminDirectAssign(StatesGroup):
     waiting_for_user_id = State()
-    waiting_for_video = State()
+    waiting_for_media = State()
     waiting_for_title = State()
 
-class AdminRenameVideo(StatesGroup):
+class AdminRenameMedia(StatesGroup):
     waiting_for_title = State()
 
 @router.message(CommandStart())
@@ -32,7 +32,6 @@ async def handle_admin_start(message: types.Message, state: FSMContext, bot: Bot
     await services.register_or_update_user(bot, message.from_user)
     await message.answer(texts.ADMIN_START, reply_markup=keyboards.get_admin_keyboard())
 
-@router.message(Command("cancel"))
 @router.message(F.text == texts.BUTTON_CANCEL)
 async def process_admin_cancel(message: types.Message, state: FSMContext):
     await state.clear()
@@ -58,25 +57,25 @@ async def process_admin_target_id(message: types.Message, state: FSMContext, bot
     target_user_id = int(text)
     await services.sync_user_from_telegram(bot, target_user_id)
     await state.update_data(target_user_id=target_user_id)
-    await state.set_state(AdminDirectAssign.waiting_for_video)
-    await message.answer(texts.ADMIN_PROMPT_DIRECT_VIDEO, reply_markup=keyboards.get_cancel_keyboard())
+    await state.set_state(AdminDirectAssign.waiting_for_media)
+    await message.answer(texts.ADMIN_PROMPT_DIRECT_MEDIA, reply_markup=keyboards.get_cancel_keyboard())
 
-@router.message(AdminDirectAssign.waiting_for_video, F.video)
-async def process_admin_target_video(message: types.Message, state: FSMContext, bot: Bot):
-    file_id = message.video.file_id
-    title = services.extract_video_title(message)
+@router.message(AdminDirectAssign.waiting_for_media, F.video | F.photo)
+async def process_admin_target_media(message: types.Message, state: FSMContext, bot: Bot):
+    file_id, media_type, title = services.extract_media_info(message)
     data = await state.get_data()
     target_id = data["target_user_id"]
     
     if title:
-        saved_file_id = await services.backup_and_get_file_id(bot, file_id, title)
-        _, is_new = await database.create_direct_order(saved_file_id, target_id, title)
+        saved_file_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
+        _, is_new = await database.create_direct_order(saved_file_id, target_id, title, media_type)
         await state.clear()
+        m_name = "Видео" if media_type == "video" else "Фото"
         if is_new:
-            await services.backup_database(bot, f"Видео «{title}» напрямую привязано к заказчику ID: <code>{target_id}</code>")
+            await services.backup_database(bot, f"{m_name} «{title}» напрямую привязано к заказчику ID: <code>{target_id}</code>")
         await message.reply(texts.ADMIN_DIRECT_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
     else:
-        await state.update_data(file_id=file_id)
+        await state.update_data(file_id=file_id, media_type=media_type)
         await state.set_state(AdminDirectAssign.waiting_for_title)
         await message.answer(texts.ADMIN_PROMPT_TITLE, reply_markup=keyboards.get_cancel_keyboard())
 
@@ -85,34 +84,36 @@ async def process_admin_target_title(message: types.Message, state: FSMContext, 
     title = message.text.strip()
     data = await state.get_data()
     target_id = data["target_user_id"]
-    saved_file_id = await services.backup_and_get_file_id(bot, data["file_id"], title)
-    _, is_new = await database.create_direct_order(saved_file_id, target_id, title)
+    media_type = data["media_type"]
+    saved_file_id = await services.backup_and_get_file_id(bot, data["file_id"], media_type, title)
+    _, is_new = await database.create_direct_order(saved_file_id, target_id, title, media_type)
     await state.clear()
+    m_name = "Видео" if media_type == "video" else "Фото"
     if is_new:
-        await services.backup_database(bot, f"Видео «{title}» напрямую привязано к заказчику ID: <code>{target_id}</code>")
+        await services.backup_database(bot, f"{m_name} «{title}» напрямую привязано к заказчику ID: <code>{target_id}</code>")
     await message.reply(texts.ADMIN_DIRECT_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
 
-@router.message(AdminDirectAssign.waiting_for_video)
-async def process_admin_target_not_video(message: types.Message):
-    await message.answer(texts.ADMIN_ERR_NEED_VIDEO, reply_markup=keyboards.get_cancel_keyboard())
+@router.message(AdminDirectAssign.waiting_for_media)
+async def process_admin_target_not_media(message: types.Message):
+    await message.answer(texts.ADMIN_ERR_NEED_MEDIA, reply_markup=keyboards.get_cancel_keyboard())
 
-@router.message(F.video)
-async def handle_video_upload(message: types.Message, state: FSMContext, bot: Bot):
-    file_id = message.video.file_id
-    title = services.extract_video_title(message)
+@router.message(F.video | F.photo)
+async def handle_media_upload(message: types.Message, state: FSMContext, bot: Bot):
+    file_id, media_type, title = services.extract_media_info(message)
     
     if title:
-        saved_file_id = await services.backup_and_get_file_id(bot, file_id, title)
-        code = await database.create_order(saved_file_id, title)
-        await services.backup_database(bot, f"Создана ссылка на видео «{title}» (код: <code>{code}</code>)")
+        saved_file_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
+        code = await database.create_order(saved_file_id, title, media_type)
+        m_name = "видео" if media_type == "video" else "фото"
+        await services.backup_database(bot, f"Создана ссылка на {m_name} «{title}» (код: <code>{code}</code>)")
         
         bot_info = await bot.get_me()
         deep_link = f"https://t.me/{bot_info.username}?start={code}"
-        reply_text = texts.admin_video_saved(code, deep_link, title)
+        reply_text = texts.admin_media_saved(code, deep_link, title, media_type)
         await message.reply(reply_text, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
     else:
         await state.set_state(AdminUpload.waiting_for_title)
-        await state.update_data(file_id=file_id)
+        await state.update_data(file_id=file_id, media_type=media_type)
         await message.answer(texts.ADMIN_PROMPT_TITLE, reply_markup=keyboards.get_cancel_keyboard())
 
 @router.message(AdminUpload.waiting_for_title, F.text)
@@ -120,17 +121,18 @@ async def process_upload_title(message: types.Message, state: FSMContext, bot: B
     title = message.text.strip()
     data = await state.get_data()
     file_id = data["file_id"]
-    saved_file_id = await services.backup_and_get_file_id(bot, file_id, title)
-    code = await database.create_order(saved_file_id, title)
+    media_type = data["media_type"]
+    saved_file_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
+    code = await database.create_order(saved_file_id, title, media_type)
     await state.clear()
     
-    await services.backup_database(bot, f"Создана ссылка на видео «{title}» (код: <code>{code}</code>)")
+    m_name = "видео" if media_type == "video" else "фото"
+    await services.backup_database(bot, f"Создана ссылка на {m_name} «{title}» (код: <code>{code}</code>)")
     bot_info = await bot.get_me()
     deep_link = f"https://t.me/{bot_info.username}?start={code}"
-    reply_text = texts.admin_video_saved(code, deep_link, title)
+    reply_text = texts.admin_media_saved(code, deep_link, title, media_type)
     await message.reply(reply_text, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
 
-@router.message(Command("customers"))
 @router.message(F.text == texts.BUTTON_CUSTOMERS_LIST)
 async def process_admin_customers_list(message: types.Message, state: FSMContext):
     await state.clear()
@@ -179,7 +181,7 @@ async def handle_customer_click(callback: types.CallbackQuery):
         markup = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text=texts.BUTTON_BACK_CUSTOMERS, callback_data="back_customers:1")
         ]])
-        await callback.message.edit_text(texts.CUSTOMER_NO_VIDEOS, reply_markup=markup)
+        await callback.message.edit_text(texts.CUSTOMER_NO_MEDIA, reply_markup=markup)
         await callback.answer()
         return
     
@@ -201,7 +203,7 @@ async def handle_customer_videos_pagination(callback: types.CallbackQuery):
         markup = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text=texts.BUTTON_BACK_CUSTOMERS, callback_data="back_customers:1")
         ]])
-        await callback.message.edit_text(texts.CUSTOMER_NO_VIDEOS, reply_markup=markup)
+        await callback.message.edit_text(texts.CUSTOMER_NO_MEDIA, reply_markup=markup)
         await callback.answer()
         return
     
@@ -220,15 +222,15 @@ async def handle_video_options(callback: types.CallbackQuery):
     
     order = await database.get_order_by_code(code)
     if not order:
-        await callback.answer("Видео не найдено", show_alert=True)
+        await callback.answer("Материал не найден", show_alert=True)
         return
     
-    _, _, _, title = order
-    video_title = title if title else "Без названия"
+    _, _, _, title, media_type = order
+    media_title = title if title else "Без названия"
     username = await database.get_user_info(user_id)
     
     markup = keyboards.build_video_actions_keyboard(code, user_id, page)
-    text = texts.video_manage_text(video_title, code, user_id, username)
+    text = texts.media_manage_text(media_title, code, user_id, username, media_type)
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
     await callback.answer()
 
@@ -237,37 +239,38 @@ async def handle_create_new_link(callback: types.CallbackQuery, bot: Bot):
     _, code, _, _ = callback.data.split(":")
     order = await database.get_order_by_code(code)
     if not order:
-        await callback.answer("Видео не найдено", show_alert=True)
+        await callback.answer("Материал не найден", show_alert=True)
         return
     
-    _, file_id, _, title = order
-    video_title = title if title else "Без названия"
-    new_code = await database.create_order(file_id, video_title)
+    _, file_id, _, title, media_type = order
+    media_title = title if title else "Без названия"
+    new_code = await database.create_order(file_id, media_title, media_type)
     
-    await services.backup_database(bot, f"Создана новая ссылка для видео «{video_title}» (код: <code>{new_code}</code>)")
+    m_name = "видео" if media_type == "video" else "фото"
+    await services.backup_database(bot, f"Создана новая ссылка для {m_name} «{media_title}» (код: <code>{new_code}</code>)")
     
     bot_info = await bot.get_me()
     deep_link = f"https://t.me/{bot_info.username}?start={new_code}"
     
-    reply_text = texts.admin_new_link_created(new_code, deep_link, video_title)
+    reply_text = texts.admin_new_link_created(new_code, deep_link, media_title, media_type)
     await callback.message.answer(reply_text, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
     await callback.answer(texts.NEW_LINK_SUCCESS)
 
 @router.callback_query(F.data.startswith("ren:"))
-async def handle_rename_video_start(callback: types.CallbackQuery, state: FSMContext):
+async def handle_rename_media_start(callback: types.CallbackQuery, state: FSMContext):
     _, code, user_id_str, page_str = callback.data.split(":")
     user_id = int(user_id_str)
     page = int(page_str)
     
-    await state.set_state(AdminRenameVideo.waiting_for_title)
+    await state.set_state(AdminRenameMedia.waiting_for_title)
     await state.update_data(code=code, user_id=user_id, page=page)
     
     await callback.message.delete()
     await callback.message.answer(texts.ADMIN_PROMPT_RENAME, reply_markup=keyboards.get_cancel_keyboard())
     await callback.answer()
 
-@router.message(AdminRenameVideo.waiting_for_title, F.text)
-async def process_rename_video_title(message: types.Message, state: FSMContext, bot: Bot):
+@router.message(AdminRenameMedia.waiting_for_title, F.text)
+async def process_rename_media_title(message: types.Message, state: FSMContext, bot: Bot):
     new_title = message.text.strip()
     data = await state.get_data()
     code = data["code"]
@@ -277,7 +280,7 @@ async def process_rename_video_title(message: types.Message, state: FSMContext, 
     await database.update_order_title(code, new_title)
     await state.clear()
     
-    await services.backup_database(bot, f"Переименовано видео (код: <code>{code}</code>) ➔ «{new_title}»")
+    await services.backup_database(bot, f"Переименован материал (код: <code>{code}</code>) ➔ «{new_title}»")
     await message.answer(texts.ADMIN_RENAME_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
     
     orders = await database.get_customer_orders(user_id)
@@ -304,21 +307,21 @@ async def handle_refresh_customer(callback: types.CallbackQuery, bot: Bot):
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 @router.callback_query(F.data.startswith("del:"))
-async def handle_delete_video_click(callback: types.CallbackQuery, bot: Bot):
+async def handle_delete_media_click(callback: types.CallbackQuery, bot: Bot):
     _, code, user_id_str, page_str = callback.data.split(":")
     user_id = int(user_id_str)
     page = int(page_str)
     
     await database.delete_order_by_code(code)
-    await services.backup_database(bot, f"Удалено видео (код: <code>{code}</code>) у заказчика ID: <code>{user_id}</code>")
-    await callback.answer(texts.VIDEO_DELETED_SUCCESS)
+    await services.backup_database(bot, f"Удален материал (код: <code>{code}</code>) у заказчика ID: <code>{user_id}</code>")
+    await callback.answer(texts.MEDIA_DELETED_SUCCESS)
     
     orders = await database.get_customer_orders(user_id)
     if not orders:
         markup = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text=texts.BUTTON_BACK_CUSTOMERS, callback_data="back_customers:1")
         ]])
-        await callback.message.edit_text(texts.CUSTOMER_NO_VIDEOS, reply_markup=markup)
+        await callback.message.edit_text(texts.CUSTOMER_NO_MEDIA, reply_markup=markup)
         return
     
     username = await database.get_user_info(user_id)

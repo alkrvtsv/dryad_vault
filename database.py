@@ -10,7 +10,8 @@ async def init_db():
                 file_id TEXT NOT NULL,
                 is_used INTEGER DEFAULT 0,
                 used_by INTEGER,
-                title TEXT
+                title TEXT,
+                media_type TEXT DEFAULT 'video'
             )
         """)
         await db.execute("""
@@ -23,10 +24,13 @@ async def init_db():
             await db.execute("ALTER TABLE orders ADD COLUMN title TEXT")
         except Exception:
             pass
+        try:
+            await db.execute("ALTER TABLE orders ADD COLUMN media_type TEXT DEFAULT 'video'")
+        except Exception:
+            pass
         await db.commit()
 
 async def save_user(user_id: int, username: str | None) -> str:
-    """Возвращает 'NEW', 'UPDATED' или 'UNCHANGED'."""
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT username FROM users WHERE user_id = ?", (user_id,))
         row = await cursor.fetchone()
@@ -40,15 +44,17 @@ async def save_user(user_id: int, username: str | None) -> str:
             return "UPDATED"
         return "UNCHANGED"
 
-async def create_order(file_id: str, title: str) -> str:
+async def create_order(file_id: str, title: str, media_type: str = "video") -> str:
     code = secrets.token_urlsafe(8)
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT INTO orders (code, file_id, title) VALUES (?, ?, ?)", (code, file_id, title))
+        await db.execute(
+            "INSERT INTO orders (code, file_id, title, media_type) VALUES (?, ?, ?, ?)",
+            (code, file_id, title, media_type)
+        )
         await db.commit()
     return code
 
-async def create_direct_order(file_id: str, user_id: int, title: str) -> tuple[str, bool]:
-    """Возвращает (code, is_new)."""
+async def create_direct_order(file_id: str, user_id: int, title: str, media_type: str = "video") -> tuple[str, bool]:
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute(
             "SELECT code FROM orders WHERE used_by = ? AND file_id = ? LIMIT 1",
@@ -60,25 +66,26 @@ async def create_direct_order(file_id: str, user_id: int, title: str) -> tuple[s
 
         code = secrets.token_urlsafe(8)
         await db.execute(
-            "INSERT INTO orders (code, file_id, is_used, used_by, title) VALUES (?, ?, 1, ?, ?)",
-            (code, file_id, user_id, title)
+            "INSERT INTO orders (code, file_id, is_used, used_by, title, media_type) VALUES (?, ?, 1, ?, ?, ?)",
+            (code, file_id, user_id, title, media_type)
         )
         await db.commit()
         return code, True
 
 async def redeem_code(code: str, user_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT file_id, is_used, used_by, title FROM orders WHERE code = ?", (code,))
+        cursor = await db.execute("SELECT file_id, is_used, used_by, title, media_type FROM orders WHERE code = ?", (code,))
         row = await cursor.fetchone()
         if not row:
-            return None, None, "NOT_FOUND"
+            return None, None, None, "NOT_FOUND"
 
-        file_id, is_used, used_by, title = row
+        file_id, is_used, used_by, title, media_type = row
+        media_type = media_type or "video"
 
         if is_used:
             if used_by == user_id:
-                return file_id, title, "ALREADY_OWNED"
-            return None, None, "USED_BY_OTHER"
+                return file_id, title, media_type, "ALREADY_OWNED"
+            return None, None, None, "USED_BY_OTHER"
 
         existing_cursor = await db.execute(
             "SELECT code, title FROM orders WHERE used_by = ? AND file_id = ? LIMIT 1",
@@ -90,15 +97,18 @@ async def redeem_code(code: str, user_id: int):
             await db.execute("DELETE FROM orders WHERE code = ?", (code,))
             await db.commit()
             resolved_title = title or existing_order[1]
-            return file_id, resolved_title, "DUPLICATE_REMOVED"
+            return file_id, resolved_title, media_type, "DUPLICATE_REMOVED"
 
         await db.execute("UPDATE orders SET is_used = 1, used_by = ? WHERE code = ?", (user_id, code))
         await db.commit()
-        return file_id, title, "SUCCESS"
+        return file_id, title, media_type, "SUCCESS"
 
 async def get_user_orders(user_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT code, file_id, title FROM orders WHERE used_by = ? ORDER BY rowid DESC", (user_id,))
+        cursor = await db.execute(
+            "SELECT code, file_id, title, COALESCE(media_type, 'video') FROM orders WHERE used_by = ? ORDER BY rowid DESC",
+            (user_id,)
+        )
         return await cursor.fetchall()
 
 async def get_customers_summary():
@@ -115,12 +125,18 @@ async def get_customers_summary():
 
 async def get_customer_orders(user_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT code, file_id, title FROM orders WHERE used_by = ? ORDER BY rowid DESC", (user_id,))
+        cursor = await db.execute(
+            "SELECT code, file_id, title, COALESCE(media_type, 'video') FROM orders WHERE used_by = ? ORDER BY rowid DESC",
+            (user_id,)
+        )
         return await cursor.fetchall()
 
 async def get_order_by_code(code: str):
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("SELECT code, file_id, used_by, title FROM orders WHERE code = ?", (code,))
+        cursor = await db.execute(
+            "SELECT code, file_id, used_by, title, COALESCE(media_type, 'video') FROM orders WHERE code = ?",
+            (code,)
+        )
         return await cursor.fetchone()
 
 async def update_order_title(code: str, title: str):

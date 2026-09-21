@@ -26,7 +26,7 @@ async def handle_deep_link(message: types.Message, command: CommandObject, state
     
     code = command.args.strip()
     keyboard = keyboards.get_user_keyboard(message.from_user.id)
-    file_id, title, status = await database.redeem_code(code, message.from_user.id)
+    file_id, title, media_type, status = await database.redeem_code(code, message.from_user.id)
     
     if status == "NOT_FOUND":
         await message.answer(texts.ERR_CODE_NOT_FOUND_LINK, reply_markup=keyboard)
@@ -35,17 +35,18 @@ async def handle_deep_link(message: types.Message, command: CommandObject, state
         await message.answer(texts.ERR_USED_BY_OTHER, reply_markup=keyboard)
         return
         
-    await message.answer(texts.VIDEO_LOADING, reply_markup=keyboard)
-    await services.send_protected_video(bot, message.chat.id, file_id, title, reply_markup=keyboard)
+    await message.answer(texts.MEDIA_LOADING, reply_markup=keyboard)
+    await services.send_protected_media(bot, message.chat.id, file_id, media_type, title, reply_markup=keyboard)
 
     user_ref = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
-    video_title = title or "Без названия"
+    media_title = title or "Без названия"
+    m_name = "видео" if media_type == "video" else "фото"
 
     if status == "SUCCESS":
-        await services.backup_database(bot, f"Заказчик {user_ref} активировал ссылку (видео «{video_title}», код: <code>{code}</code>)")
-        await services.notify_admin(bot, code, message.from_user, title)
+        await services.backup_database(bot, f"Заказчик {user_ref} активировал ссылку ({m_name} «{media_title}», код: <code>{code}</code>)")
+        await services.notify_admin(bot, code, message.from_user, title, media_type)
     elif status == "DUPLICATE_REMOVED":
-        await services.backup_database(bot, f"Удален лишний временный код <code>{code}</code> (видео «{video_title}» уже есть у {user_ref})")
+        await services.backup_database(bot, f"Удален лишний временный код <code>{code}</code> ({m_name} «{media_title}» уже есть у {user_ref})")
 
 @router.message(CommandStart(), F.from_user.id != ADMIN_ID)
 async def handle_regular_start(message: types.Message, state: FSMContext, bot: Bot):
@@ -89,16 +90,16 @@ async def handle_client_video_click(callback: types.CallbackQuery, bot: Bot):
     code = callback.data.split(":")[1]
     order = await database.get_order_by_code(code)
     if not order or order[2] != callback.from_user.id:
-        await callback.answer("Видео не найдено или недоступно", show_alert=True)
+        await callback.answer("Материал не найден или недоступен", show_alert=True)
         return
     
-    _, file_id, _, title = order
+    _, file_id, _, title, media_type = order
     await callback.answer()
-    # Восстанавливаем клавиатуру вместе с роликом
-    await services.send_protected_video(
+    await services.send_protected_media(
         bot,
         callback.message.chat.id,
         file_id,
+        media_type,
         title,
         reply_markup=keyboards.get_client_keyboard()
     )
@@ -116,7 +117,7 @@ async def process_code_input(message: types.Message, state: FSMContext, bot: Bot
         await process_history_button(message, state, bot)
         return
 
-    file_id, title, status = await database.redeem_code(text, message.from_user.id)
+    file_id, title, media_type, status = await database.redeem_code(text, message.from_user.id)
     await state.clear()
     
     if status == "NOT_FOUND":
@@ -127,20 +128,22 @@ async def process_code_input(message: types.Message, state: FSMContext, bot: Bot
         await message.answer(texts.ERR_USED_BY_OTHER, reply_markup=keyboards.get_client_keyboard())
         return
     
-    await message.answer(texts.VIDEO_LOADING, reply_markup=keyboards.get_client_keyboard())
-    await services.send_protected_video(
+    await message.answer(texts.MEDIA_LOADING, reply_markup=keyboards.get_client_keyboard())
+    await services.send_protected_media(
         bot,
         message.chat.id,
         file_id,
+        media_type,
         title,
         reply_markup=keyboards.get_client_keyboard()
     )
 
     user_ref = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
-    video_title = title or "Без названия"
+    media_title = title or "Без названия"
+    m_name = "видео" if media_type == "video" else "фото"
 
     if status == "SUCCESS":
-        await services.backup_database(bot, f"Заказчик {user_ref} ввёл код вручную (видео «{video_title}», код: <code>{text}</code>)")
-        await services.notify_admin(bot, text, message.from_user, title)
+        await services.backup_database(bot, f"Заказчик {user_ref} ввёл код вручную ({m_name} «{media_title}», код: <code>{text}</code>)")
+        await services.notify_admin(bot, text, message.from_user, title, media_type)
     elif status == "DUPLICATE_REMOVED":
-        await services.backup_database(bot, f"Удален лишний временный код <code>{text}</code> (видео «{video_title}» уже есть у {user_ref})")
+        await services.backup_database(bot, f"Удален лишний временный код <code>{text}</code> ({m_name} «{media_title}» уже есть у {user_ref})")

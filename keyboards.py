@@ -51,7 +51,7 @@ def build_customers_keyboard(customers, page: int = 1):
     inline_keyboard = []
     for user_id, username, count in current_items:
         display_name = f"@{username}" if username else f"ID: {user_id}"
-        button_text = f"👤 {display_name} ({count} 🎬)"
+        button_text = f"👤 {display_name} ({count} шт.)"
         inline_keyboard.append([InlineKeyboardButton(text=button_text, callback_data=f"cust:{user_id}:1")])
 
     if total_pages > 1:
@@ -67,11 +67,12 @@ def build_customer_videos_keyboard(orders, user_id: int, page: int = 1):
     current_items = orders[start_idx:start_idx + PAGE_SIZE]
 
     inline_keyboard = []
-    for idx, (code, _, title) in enumerate(current_items, start=start_idx + 1):
-        video_title = title if title else f"Видео #{idx} (без названия)"
-        if len(video_title) > 25:
-            video_title = video_title[:22] + "..."
-        button_text = f"🎬 {idx}. {video_title}"
+    for idx, (code, _, title, media_type) in enumerate(current_items, start=start_idx + 1):
+        icon = "🎬" if media_type == "video" else "🖼"
+        media_title = title if title else f"Материал #{idx}"
+        if len(media_title) > 24:
+            media_title = media_title[:21] + "..."
+        button_text = f"{icon} {idx}. {media_title}"
         inline_keyboard.append([
             InlineKeyboardButton(text=button_text, callback_data=f"vopt:{code}:{user_id}:{page}")
         ])
@@ -91,9 +92,9 @@ def build_customer_videos_keyboard(orders, user_id: int, page: int = 1):
 def build_video_actions_keyboard(code: str, user_id: int, page: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=texts.BUTTON_NEW_LINK, callback_data=f"newlink:{code}:{user_id}:{page}")],
-        [InlineKeyboardButton(text=texts.BUTTON_RENAME_VIDEO, callback_data=f"ren:{code}:{user_id}:{page}")],
+        [InlineKeyboardButton(text=texts.BUTTON_RENAME_MEDIA, callback_data=f"ren:{code}:{user_id}:{page}")],
         [InlineKeyboardButton(text=texts.BUTTON_DELETE_CONFIRM, callback_data=f"del:{code}:{user_id}:{page}")],
-        [InlineKeyboardButton(text=texts.BUTTON_BACK_VIDEOS, callback_data=f"cust:{user_id}:{page}")]
+        [InlineKeyboardButton(text=texts.BUTTON_BACK_MEDIAS, callback_data=f"cust:{user_id}:{page}")]
     ])
 
 def build_client_history_keyboard(orders, page: int = 1):
@@ -103,11 +104,12 @@ def build_client_history_keyboard(orders, page: int = 1):
     current_items = orders[start_idx:start_idx + PAGE_SIZE]
 
     inline_keyboard = []
-    for idx, (code, _, title) in enumerate(current_items, start=start_idx + 1):
-        video_title = title if title else f"Видео #{idx}"
-        if len(video_title) > 28:
-            video_title = video_title[:25] + "..."
-        button_text = f"▶️ {video_title}"
+    for idx, (code, _, title, media_type) in enumerate(current_items, start=start_idx + 1):
+        icon = "🎬" if media_type == "video" else "🖼"
+        media_title = title if title else f"Материал #{idx}"
+        if len(media_title) > 26:
+            media_title = media_title[:23] + "..."
+        button_text = f"{icon} {media_title}"
         inline_keyboard.append([InlineKeyboardButton(text=button_text, callback_data=f"my_v:{code}")])
 
     if total_pages > 1:

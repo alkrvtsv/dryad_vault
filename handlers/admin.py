@@ -234,6 +234,25 @@ async def handle_video_options(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
     await callback.answer()
 
+@router.callback_query(F.data.startswith("view:"))
+async def handle_admin_view_media(callback: types.CallbackQuery, bot: Bot):
+    code = callback.data.split(":")[1]
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    
+    _, file_id, _, title, media_type = order
+    await callback.answer()
+    await services.send_protected_media(
+        bot,
+        chat_id=callback.message.chat.id,
+        file_id=file_id,
+        media_type=media_type,
+        title=title,
+        reply_markup=keyboards.get_admin_keyboard()
+    )
+
 @router.callback_query(F.data.startswith("newlink:"))
 async def handle_create_new_link(callback: types.CallbackQuery, bot: Bot):
     _, code, _, _ = callback.data.split(":")

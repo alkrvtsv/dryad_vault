@@ -19,6 +19,8 @@ def get_admin_keyboard():
             [KeyboardButton(text=texts.BUTTON_UPLOAD)],
             [KeyboardButton(text=texts.BUTTON_ASSIGN_DIRECT)],
             [KeyboardButton(text=texts.BUTTON_CUSTOMERS_LIST)],
+            [KeyboardButton(text=texts.BUTTON_UNLINKED)],
+            [KeyboardButton(text=texts.BUTTON_ALL_MEDIA)],
             [KeyboardButton(text=texts.BUTTON_TEST)]
         ],
         resize_keyboard=True,
@@ -95,7 +97,8 @@ def build_video_actions_keyboard(code: str, user_id: int, page: int):
         [InlineKeyboardButton(text=texts.BUTTON_VIEW_MEDIA, callback_data=f"view:{code}")],
         [InlineKeyboardButton(text=texts.BUTTON_NEW_LINK, callback_data=f"newlink:{code}:{user_id}:{page}")],
         [InlineKeyboardButton(text=texts.BUTTON_RENAME_MEDIA, callback_data=f"ren:{code}:{user_id}:{page}")],
-        [InlineKeyboardButton(text=texts.BUTTON_DELETE_CONFIRM, callback_data=f"del:{code}:{user_id}:{page}")],
+        [InlineKeyboardButton(text=texts.BUTTON_UNLINK, callback_data=f"unlink:{code}:{user_id}:{page}")],
+        [InlineKeyboardButton(text=texts.BUTTON_DELETE_FULL, callback_data=f"del_full:{code}:{user_id}:{page}")],
         [InlineKeyboardButton(text=texts.BUTTON_BACK_MEDIAS, callback_data=f"cust:{user_id}:{page}")]
     ])
 
@@ -121,3 +124,76 @@ def build_client_history_keyboard(orders, page: int=1):
         row = build_pagination_row(f"my_p:{page-1}", f"my_p:{page+1}", page, total_pages)
         inline_keyboard.append(row)
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+def build_unlinked_keyboard(orders, page: int=1):
+    total_pages = (len(orders) + PAGE_SIZE - 1) // PAGE_SIZE
+    page = max(1, min(page, total_pages)) if total_pages > 0 else 1
+    start_idx = (page - 1) * PAGE_SIZE
+    current_items = orders[start_idx:start_idx+PAGE_SIZE]
+    inline_keyboard = []
+    for idx, (code, _, title, media_type, _) in enumerate(current_items, start=start_idx+1):
+        if media_type == "video": 
+            icon = "🎬"
+        elif media_type == "album": 
+            icon = "📸"
+        else: 
+            icon = "🖼"
+        media_title = title if title else f"Материал #{idx}"
+        if len(media_title) > 24:
+            media_title = media_title[:21] + "..."
+        button_text = f"{icon}{idx}. {media_title}"
+        inline_keyboard.append([
+            InlineKeyboardButton(text=button_text, callback_data=f"unl_opt:{code}:{page}")
+        ])
+    if total_pages > 1:
+        row = build_pagination_row(f"unl_p:{page-1}", f"unl_p:{page+1}", page, total_pages)
+        inline_keyboard.append(row)
+    inline_keyboard.append([
+        InlineKeyboardButton(text=texts.BUTTON_BACK_ADMIN, callback_data="back_admin")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard), current_items, total_pages, page, start_idx+1
+
+def build_all_media_keyboard(media_list, page: int=1):
+    total_pages = (len(media_list) + PAGE_SIZE - 1) // PAGE_SIZE
+    page = max(1, min(page, total_pages)) if total_pages > 0 else 1
+    start_idx = (page - 1) * PAGE_SIZE
+    current_items = media_list[start_idx:start_idx+PAGE_SIZE]
+    inline_keyboard = []
+    for idx, (code, _, title, media_type, order_count) in enumerate(current_items, start=start_idx+1):
+        if media_type == "video": 
+            icon = "🎬"
+        elif media_type == "album": 
+            icon = "📸"
+        else: 
+            icon = "🖼"
+        media_title = title if title else f"Материал #{idx}"
+        if len(media_title) > 20:
+            media_title = media_title[:17] + "..."
+        button_text = f"{icon}{idx}. {media_title} ({order_count})"
+        inline_keyboard.append([
+            InlineKeyboardButton(text=button_text, callback_data=f"allm_opt:{code}:{page}")
+        ])
+    if total_pages > 1:
+        row = build_pagination_row(f"allm_p:{page-1}", f"allm_p:{page+1}", page, total_pages)
+        inline_keyboard.append(row)
+    inline_keyboard.append([
+        InlineKeyboardButton(text=texts.BUTTON_BACK_ADMIN, callback_data="back_admin")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard), current_items, total_pages, page, start_idx+1
+
+def build_unlinked_actions_keyboard(code: str, page: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=texts.BUTTON_VIEW_MEDIA, callback_data=f"view_unl:{code}")],
+        [InlineKeyboardButton(text=texts.BUTTON_LINK_USER, callback_data=f"link_unl:{code}:{page}")],
+        [InlineKeyboardButton(text=texts.BUTTON_CREATE_LINK, callback_data=f"newlink_unl:{code}:{page}")],
+        [InlineKeyboardButton(text=texts.BUTTON_DELETE_FULL, callback_data=f"del_unl:{code}:{page}")],
+        [InlineKeyboardButton(text=texts.BUTTON_BACK_UNLINKED, callback_data=f"unl_p:{page}")]
+    ])
+
+def build_all_media_actions_keyboard(code: str, page: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=texts.BUTTON_VIEW_MEDIA, callback_data=f"view_allm:{code}")],
+        [InlineKeyboardButton(text=texts.BUTTON_CREATE_LINK, callback_data=f"newlink_allm:{code}:{page}")],
+        [InlineKeyboardButton(text=texts.BUTTON_DELETE_FULL, callback_data=f"del_allm:{code}:{page}")],
+        [InlineKeyboardButton(text=texts.BUTTON_BACK_ALL_MEDIA, callback_data=f"allm_p:{page}")]
+    ])

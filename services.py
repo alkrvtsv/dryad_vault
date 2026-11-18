@@ -151,7 +151,6 @@ async def send_protected_media(
     title: str|None=None,
     reply_markup=None
 ):
-    """Отправляет защищенный материал пользователю и отслеживает его в тестовом режиме."""
     if media_type == "album":
         try:
             media_list = json.loads(file_id)
@@ -185,15 +184,6 @@ async def send_protected_media(
         if config.TEST_MODE:
             for msg in sent_msgs:
                 config.TEST_SENT_MESSAGES.append((chat_id, msg.message_id))
-        
-        if reply_markup:
-            menu_msg = await bot.send_message(
-                chat_id=chat_id, 
-                text="⬇️ Меню:", 
-                reply_markup=reply_markup
-            )
-            if config.TEST_MODE:
-                config.TEST_SENT_MESSAGES.append((chat_id, menu_msg.message_id))
             
     elif media_type == "video":
         sent_msg = await bot.send_video(

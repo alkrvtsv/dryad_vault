@@ -74,6 +74,9 @@ async def backup_and_get_file_id(bot: Bot, file_id: str, media_type: str, title:
                 caption=caption,
                 parse_mode=ParseMode.HTML
             )
+            # Если тестовый режим активен, сохраняем ID сообщения для удаления
+            if config.TEST_MODE:
+                config.TEST_ARCHIVED_MESSAGES.append((ARCHIVE_CHANNEL_ID, archived_msg.message_id))
             return archived_msg.video.file_id
         else:
             archived_msg = await bot.send_photo(
@@ -82,6 +85,9 @@ async def backup_and_get_file_id(bot: Bot, file_id: str, media_type: str, title:
                 caption=caption,
                 parse_mode=ParseMode.HTML
             )
+            # Если тестовый режим активен, сохраняем ID сообщения для удаления
+            if config.TEST_MODE:
+                config.TEST_ARCHIVED_MESSAGES.append((ARCHIVE_CHANNEL_ID, archived_msg.message_id))
             return archived_msg.photo[-1].file_id
     except Exception:
         return file_id
@@ -103,6 +109,12 @@ async def backup_and_get_album_file_ids(bot: Bot, file_ids: list[str], media_typ
             chat_id=ARCHIVE_CHANNEL_ID,
             media=media_group
         )
+        
+        # Если тестовый режим активен, сохраняем ID сообщений для удаления
+        if config.TEST_MODE:
+            for msg in archived_msgs:
+                config.TEST_ARCHIVED_MESSAGES.append((ARCHIVE_CHANNEL_ID, msg.message_id))
+        
         new_media_list = []
         for i, m in enumerate(archived_msgs):
             if media_types[i] == "video":
@@ -201,6 +213,9 @@ async def enable_test_mode(bot: Bot) -> bool:
         if os.path.exists(DB_NAME):
             shutil.copy2(DB_NAME, TEST_BACKUP_PATH)
         
+        # Очищаем список архивных сообщений
+        config.TEST_ARCHIVED_MESSAGES.clear()
+        
         # Устанавливаем флаг тестового режима
         config.TEST_MODE = True
         
@@ -213,21 +228,35 @@ async def enable_test_mode(bot: Bot) -> bool:
         return False
 
 async def disable_test_mode(bot: Bot) -> bool:
-    """Отключает режим тестирования и восстанавливает БД. Возвращает True если успешно."""
+    """Отключает режим тестирования, восстанавливает БД и удаляет тестовые материалы из архива."""
     if not config.TEST_MODE:
         return False
     
     try:
+        # Удаляем все материалы из архивного канала, загруженные во время теста
+        deleted_count = 0
+        for chat_id, message_id in config.TEST_ARCHIVED_MESSAGES:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+                deleted_count += 1
+            except Exception as e:
+                logging.error(f"Не удалось удалить сообщение {message_id} из архива: {e}")
+        
         # Восстанавливаем базу данных из бэкапа
         if os.path.exists(TEST_BACKUP_PATH):
             shutil.copy2(TEST_BACKUP_PATH, DB_NAME)
             os.remove(TEST_BACKUP_PATH)
         
-        # Снимаем флаг тестового режима
+        # Снимаем флаг тестового режима и очищаем список
         config.TEST_MODE = False
+        config.TEST_ARCHIVED_MESSAGES.clear()
         
-        # Логируем действие
-        await backup_database(bot, "✅ Режим тестирования завершен, БД восстановлена")
+        # Логируем действие (уже в восстановленную БД не попадет, т.к. файл восстановлен)
+        # Просто отправляем уведомление админу
+        await bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"✅ Режим тестирования завершен. Удалено материалов из архива: {deleted_count}"
+        )
         
         return True
     except Exception as e:

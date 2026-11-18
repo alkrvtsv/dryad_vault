@@ -19,4 +19,6 @@ PAGE_SIZE = 5
 # Настройки режима тестирования
 TEST_MODE = False
 TEST_BACKUP_PATH = DB_NAME + ".test_backup"
-TEST_ALLOWED_USER_ID = 7896647014
+
+# Список сообщений в архивном канале, отправленных во время теста: [(chat_id, message_id), ...]
+TEST_ARCHIVED_MESSAGES = []

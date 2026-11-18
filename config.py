@@ -22,3 +22,6 @@ TEST_BACKUP_PATH = DB_NAME + ".test_backup"
 
 # Список сообщений в архивном канале, отправленных во время теста: [(chat_id, message_id), ...]
 TEST_ARCHIVED_MESSAGES = []
+
+# Список сообщений с материалами, отправленных пользователям во время теста: [(chat_id, message_id), ...]
+TEST_SENT_MESSAGES = []

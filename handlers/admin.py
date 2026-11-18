@@ -27,6 +27,9 @@ class AdminDirectAssign(StatesGroup):
 class AdminRenameMedia(StatesGroup):
     waiting_for_title = State()
 
+class AdminLinkUnlinked(StatesGroup):
+    waiting_for_user_id = State()
+
 media_group_cache = {}
 
 async def process_album_after_delay(media_group_id: str):
@@ -64,15 +67,17 @@ async def process_album_after_delay(media_group_id: str):
     
     if title:
         if is_direct:
-            saved_file_ids_str = await services.backup_and_get_album_file_ids(bot, file_ids, media_types, title)
-            _, is_new = await database.create_direct_order(saved_file_ids_str, target_user_id, title, media_type)
+            saved_file_ids_str, archive_msg_ids = await services.backup_and_get_album_file_ids(bot, file_ids, media_types, title)
+            archive_msg_id_str = ",".join(map(str, archive_msg_ids)) if archive_msg_ids else None
+            _, is_new = await database.create_direct_order(saved_file_ids_str, target_user_id, title, media_type, archive_msg_id_str)
             await state.clear()
             if is_new:
                 await services.backup_database(bot, f"Альбом «{title}» напрямую привязан к заказчику ID: <code>{target_user_id}</code>")
                 await messages[0].reply(texts.ADMIN_DIRECT_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
         else:
-            saved_file_ids_str = await services.backup_and_get_album_file_ids(bot, file_ids, media_types, title)
-            code = await database.create_order(saved_file_ids_str, title, media_type)
+            saved_file_ids_str, archive_msg_ids = await services.backup_and_get_album_file_ids(bot, file_ids, media_types, title)
+            archive_msg_id_str = ",".join(map(str, archive_msg_ids)) if archive_msg_ids else None
+            code = await database.create_order(saved_file_ids_str, title, media_type, archive_msg_id_str)
             await services.backup_database(bot, f"Создана ссылка на альбом «{title}» ({len(file_ids)} фото, код: <code>{code}</code>)")
             bot_info = await bot.get_me()
             deep_link = f"https://t.me/{bot_info.username}?start={code}"
@@ -119,18 +124,15 @@ async def process_admin_cancel(message: types.Message, state: FSMContext):
 
 @router.message(F.text == texts.BUTTON_TEST)
 async def handle_test_mode(message: types.Message, bot: Bot):
-    """Обработчик кнопки тестового режима."""
     import config
     
     if not config.TEST_MODE:
-        # Включаем тестовый режим
         success = await services.enable_test_mode(bot)
         if success:
             await message.answer(texts.TEST_MODE_ENABLED, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
         else:
             await message.answer("❌ Ошибка включения тестового режима", reply_markup=keyboards.get_admin_keyboard())
     else:
-        # Отключаем тестовый режим
         success = await services.disable_test_mode(bot)
         if success:
             await message.answer(texts.TEST_MODE_DISABLED, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
@@ -165,8 +167,9 @@ async def process_admin_target_media(message: types.Message, state: FSMContext, 
     data = await state.get_data()
     target_id = data["target_user_id"]
     if title:
-        saved_file_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
-        _, is_new = await database.create_direct_order(saved_file_id, target_id, title, media_type)
+        saved_file_id, archive_msg_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
+        archive_msg_id_str = str(archive_msg_id) if archive_msg_id else None
+        _, is_new = await database.create_direct_order(saved_file_id, target_id, title, media_type, archive_msg_id_str)
         await state.clear()
         m_name = "Видео" if media_type == "video" else "Фото"
         if is_new:
@@ -185,8 +188,9 @@ async def process_admin_target_not_media(message: types.Message):
 async def handle_media_upload(message: types.Message, state: FSMContext, bot: Bot):
     file_id, media_type, title = services.extract_media_info(message)
     if title:
-        saved_file_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
-        code = await database.create_order(saved_file_id, title, media_type)
+        saved_file_id, archive_msg_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
+        archive_msg_id_str = str(archive_msg_id) if archive_msg_id else None
+        code = await database.create_order(saved_file_id, title, media_type, archive_msg_id_str)
         m_name = "видео" if media_type == "video" else "фото"
         await services.backup_database(bot, f"Создана ссылка на {m_name} «{title}» (код: <code>{code}</code>)")
         bot_info = await bot.get_me()
@@ -209,8 +213,9 @@ async def process_upload_title(message: types.Message, state: FSMContext, bot: B
     if media_type == "album":
         file_ids = data["file_ids"]
         media_types = data["media_types"]
-        saved_file_ids_str = await services.backup_and_get_album_file_ids(bot, file_ids, media_types, title)
-        code = await database.create_order(saved_file_ids_str, title, media_type)
+        saved_file_ids_str, archive_msg_ids = await services.backup_and_get_album_file_ids(bot, file_ids, media_types, title)
+        archive_msg_id_str = ",".join(map(str, archive_msg_ids)) if archive_msg_ids else None
+        code = await database.create_order(saved_file_ids_str, title, media_type, archive_msg_id_str)
         m_name = "альбом"
         await services.backup_database(bot, f"Создана ссылка на {m_name} «{title}» (код: <code>{code}</code>)")
         bot_info = await bot.get_me()
@@ -219,8 +224,9 @@ async def process_upload_title(message: types.Message, state: FSMContext, bot: B
         await message.reply(reply_text, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
     else:
         file_id = data["file_id"]
-        saved_file_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
-        code = await database.create_order(saved_file_id, title, media_type)
+        saved_file_id, archive_msg_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
+        archive_msg_id_str = str(archive_msg_id) if archive_msg_id else None
+        code = await database.create_order(saved_file_id, title, media_type, archive_msg_id_str)
         m_name = "видео" if media_type == "video" else "фото"
         await services.backup_database(bot, f"Создана ссылка на {m_name} «{title}» (код: <code>{code}</code>)")
         bot_info = await bot.get_me()
@@ -240,16 +246,18 @@ async def process_admin_target_title(message: types.Message, state: FSMContext, 
     if media_type == "album":
         file_ids = data["file_ids"]
         media_types = data["media_types"]
-        saved_file_ids_str = await services.backup_and_get_album_file_ids(bot, file_ids, media_types, title)
-        _, is_new = await database.create_direct_order(saved_file_ids_str, target_id, title, media_type)
+        saved_file_ids_str, archive_msg_ids = await services.backup_and_get_album_file_ids(bot, file_ids, media_types, title)
+        archive_msg_id_str = ",".join(map(str, archive_msg_ids)) if archive_msg_ids else None
+        _, is_new = await database.create_direct_order(saved_file_ids_str, target_id, title, media_type, archive_msg_id_str)
         m_name = "Альбом"
         if is_new:
             await services.backup_database(bot, f"{m_name} «{title}» напрямую привязан к заказчику ID: <code>{target_id}</code>")
             await message.reply(texts.ADMIN_DIRECT_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
     else:
         file_id = data["file_id"]
-        saved_file_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
-        _, is_new = await database.create_direct_order(saved_file_id, target_id, title, media_type)
+        saved_file_id, archive_msg_id = await services.backup_and_get_file_id(bot, file_id, media_type, title)
+        archive_msg_id_str = str(archive_msg_id) if archive_msg_id else None
+        _, is_new = await database.create_direct_order(saved_file_id, target_id, title, media_type, archive_msg_id_str)
         m_name = "Видео" if media_type == "video" else "Фото"
         if is_new:
             await services.backup_database(bot, f"{m_name} «{title}» напрямую привязано к заказчику ID: <code>{target_id}</code>")
@@ -264,6 +272,26 @@ async def process_admin_customers_list(message: types.Message, state: FSMContext
         return
     markup = keyboards.build_customers_keyboard(customers, page=1)
     await message.answer(texts.CUSTOMERS_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+@router.message(F.text == texts.BUTTON_UNLINKED)
+async def handle_unlinked_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    orders = await database.get_unlinked_orders()
+    if not orders:
+        await message.answer(texts.UNLINKED_EMPTY, reply_markup=keyboards.get_admin_keyboard())
+        return
+    markup, current_items, total_pages, actual_page, start_idx = keyboards.build_unlinked_keyboard(orders, page=1)
+    await message.answer(texts.UNLINKED_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+@router.message(F.text == texts.BUTTON_ALL_MEDIA)
+async def handle_all_media_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    media_list = await database.get_all_unique_media()
+    if not media_list:
+        await message.answer(texts.ALL_MEDIA_EMPTY, reply_markup=keyboards.get_admin_keyboard())
+        return
+    markup, current_items, total_pages, actual_page, start_idx = keyboards.build_all_media_keyboard(media_list, page=1)
+    await message.answer(texts.ALL_MEDIA_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 @router.callback_query(F.data.startswith("cust_p:"))
 async def handle_customers_pagination(callback: types.CallbackQuery):
@@ -287,6 +315,11 @@ async def handle_back_to_customers(callback: types.CallbackQuery):
         return
     markup = keyboards.build_customers_keyboard(customers, page=page)
     await callback.message.edit_text(texts.CUSTOMERS_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
+    await callback.answer()
+
+@router.callback_query(F.data == "back_admin")
+async def handle_back_to_admin(callback: types.CallbackQuery):
+    await callback.message.edit_text(texts.ADMIN_START, reply_markup=keyboards.get_admin_keyboard())
     await callback.answer()
 
 @router.callback_query(F.data.startswith("cust:"))
@@ -336,7 +369,7 @@ async def handle_video_options(callback: types.CallbackQuery):
     if not order:
         await callback.answer("Материал не найден", show_alert=True)
         return
-    _, _, _, title, media_type = order
+    _, _, _, title, media_type, _ = order
     media_title = title if title else "Без названия"
     username = await database.get_user_info(user_id)
     markup = keyboards.build_video_actions_keyboard(code, user_id, page)
@@ -351,7 +384,7 @@ async def handle_admin_view_media(callback: types.CallbackQuery, bot: Bot):
     if not order:
         await callback.answer("Материал не найден", show_alert=True)
         return
-    _, file_id, _, title, media_type = order
+    _, file_id, _, title, media_type, _ = order
     await callback.answer()
     await services.send_protected_media(
         bot,
@@ -369,9 +402,9 @@ async def handle_create_new_link(callback: types.CallbackQuery, bot: Bot):
     if not order:
         await callback.answer("Материал не найден", show_alert=True)
         return
-    _, file_id, _, title, media_type = order
+    _, file_id, _, title, media_type, archive_msg_id = order
     media_title = title if title else "Без названия"
-    new_code = await database.create_order(file_id, media_title, media_type)
+    new_code = await database.create_order(file_id, media_title, media_type, archive_msg_id)
     m_name = "видео" if media_type == "video" else "фото"
     await services.backup_database(bot, f"Создана новая ссылка для {m_name} «{media_title}» (код: <code>{new_code}</code>)")
     bot_info = await bot.get_me()
@@ -423,14 +456,14 @@ async def handle_refresh_customer(callback: types.CallbackQuery, bot: Bot):
     text = texts.customer_details_title(username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
-@router.callback_query(F.data.startswith("del:"))
-async def handle_delete_media_click(callback: types.CallbackQuery, bot: Bot):
+@router.callback_query(F.data.startswith("unlink:"))
+async def handle_unlink_click(callback: types.CallbackQuery, bot: Bot):
     _, code, user_id_str, page_str = callback.data.split(":")
     user_id = int(user_id_str)
     page = int(page_str)
-    await database.delete_order_by_code(code)
-    await services.backup_database(bot, f"Удален материал (код: <code>{code}</code>) у заказчика ID: <code>{user_id}</code>")
-    await callback.answer(texts.MEDIA_DELETED_SUCCESS)
+    await database.unlink_order(code)
+    await services.backup_database(bot, f"Материал (код: <code>{code}</code>) отвязан от заказчика ID: <code>{user_id}</code>")
+    await callback.answer(texts.UNLINK_SUCCESS)
     orders = await database.get_customer_orders(user_id)
     if not orders:
         markup = InlineKeyboardMarkup(inline_keyboard=[[
@@ -442,3 +475,247 @@ async def handle_delete_media_click(callback: types.CallbackQuery, bot: Bot):
     markup, current_items, total_pages, actual_page, start_idx = keyboards.build_customer_videos_keyboard(orders, user_id, page)
     text = texts.customer_details_title(username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
     await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+@router.callback_query(F.data.startswith("del_full:"))
+async def handle_delete_full_click(callback: types.CallbackQuery, bot: Bot):
+    _, code, user_id_str, page_str = callback.data.split(":")
+    user_id = int(user_id_str)
+    page = int(page_str)
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, file_id, _, _, _, archive_msg_id = order
+    await database.delete_order_by_code(code)
+    deleted = await services.delete_from_archive(bot, archive_msg_id)
+    await services.backup_database(bot, f"Удален материал (код: <code>{code}</code>) у заказчика ID: <code>{user_id}</code>")
+    await callback.answer(f"Удалено из архива: {deleted}")
+    orders = await database.get_customer_orders(user_id)
+    if not orders:
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=texts.BUTTON_BACK_CUSTOMERS, callback_data="back_customers:1")
+        ]])
+        await callback.message.edit_text(texts.CUSTOMER_NO_MEDIA, reply_markup=markup)
+        return
+    username = await database.get_user_info(user_id)
+    markup, current_items, total_pages, actual_page, start_idx = keyboards.build_customer_videos_keyboard(orders, user_id, page)
+    text = texts.customer_details_title(username, user_id, current_items, len(orders), actual_page, total_pages, start_idx)
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+# === Обработчики для материалов без привязки ===
+
+@router.callback_query(F.data.startswith("unl_opt:"))
+async def handle_unlinked_options(callback: types.CallbackQuery):
+    _, code, page_str = callback.data.split(":")
+    page = int(page_str)
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, _, _, title, media_type, _ = order
+    media_title = title if title else "Без названия"
+    markup = keyboards.build_unlinked_actions_keyboard(code, page)
+    text = f"📦 <b>{media_title}</b>\n\nВыбери действие:"
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("unl_p:"))
+async def handle_unlinked_pagination(callback: types.CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    orders = await database.get_unlinked_orders()
+    if not orders:
+        await callback.message.edit_text(texts.UNLINKED_EMPTY)
+        await callback.answer()
+        return
+    markup, current_items, total_pages, actual_page, start_idx = keyboards.build_unlinked_keyboard(orders, page)
+    await callback.message.edit_text(texts.UNLINKED_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("view_unl:"))
+async def handle_view_unlinked(callback: types.CallbackQuery, bot: Bot):
+    code = callback.data.split(":")[1]
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, file_id, _, title, media_type, _ = order
+    await callback.answer()
+    await services.send_protected_media(
+        bot,
+        chat_id=callback.message.chat.id,
+        file_id=file_id,
+        media_type=media_type,
+        title=title,
+        reply_markup=keyboards.get_admin_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("link_unl:"))
+async def handle_link_unlinked_start(callback: types.CallbackQuery, state: FSMContext):
+    _, code, page_str = callback.data.split(":")
+    page = int(page_str)
+    await state.set_state(AdminLinkUnlinked.waiting_for_user_id)
+    await state.update_data(code=code, page=page)
+    await callback.message.delete()
+    await callback.message.answer(texts.LINK_UNLINKED_PROMPT, reply_markup=keyboards.get_cancel_keyboard())
+    await callback.answer()
+
+@router.message(AdminLinkUnlinked.waiting_for_user_id, F.text)
+async def process_link_unlinked_user_id(message: types.Message, state: FSMContext, bot: Bot):
+    text = message.text.strip()
+    if text == texts.BUTTON_CANCEL:
+        await state.clear()
+        await message.answer(texts.ADMIN_ACTION_CANCELLED, reply_markup=keyboards.get_admin_keyboard())
+        return
+    if not text.isdigit():
+        await message.answer(texts.ADMIN_ERR_INVALID_ID, reply_markup=keyboards.get_cancel_keyboard())
+        return
+    target_user_id = int(text)
+    data = await state.get_data()
+    code = data["code"]
+    page = data.get("page", 1)
+    order = await database.get_order_by_code(code)
+    if not order:
+        await state.clear()
+        await message.answer("Материал не найден", reply_markup=keyboards.get_admin_keyboard())
+        return
+    _, file_id, _, title, media_type, archive_msg_id = order
+    await services.sync_user_from_telegram(bot, target_user_id)
+    await database.create_direct_order(file_id, target_user_id, title, media_type, archive_msg_id)
+    await database.delete_order_by_code(code)
+    await state.clear()
+    m_name = "видео" if media_type == "video" else "фото"
+    await services.backup_database(bot, f"Материал «{title}» привязан к заказчику ID: <code>{target_user_id}</code>")
+    await message.answer(texts.LINK_UNLINKED_SUCCESS, reply_markup=keyboards.get_admin_keyboard())
+    orders = await database.get_unlinked_orders()
+    if not orders:
+        await message.answer(texts.UNLINKED_EMPTY, reply_markup=keyboards.get_admin_keyboard())
+        return
+    markup, current_items, total_pages, actual_page, start_idx = keyboards.build_unlinked_keyboard(orders, page)
+    await message.answer(texts.UNLINKED_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+@router.callback_query(F.data.startswith("newlink_unl:"))
+async def handle_create_link_unlinked(callback: types.CallbackQuery, bot: Bot):
+    _, code, page_str = callback.data.split(":")
+    page = int(page_str)
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, file_id, _, title, media_type, archive_msg_id = order
+    media_title = title if title else "Без названия"
+    new_code = await database.create_order(file_id, media_title, media_type, archive_msg_id)
+    m_name = "видео" if media_type == "video" else "фото"
+    await services.backup_database(bot, f"Создана новая ссылка для {m_name} «{media_title}» (код: <code>{new_code}</code>)")
+    bot_info = await bot.get_me()
+    deep_link = f"https://t.me/{bot_info.username}?start={new_code}"
+    reply_text = texts.admin_new_link_created(new_code, deep_link, media_title, media_type)
+    await callback.message.answer(reply_text, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
+    await callback.answer(texts.NEW_LINK_UNLINKED_SUCCESS)
+
+@router.callback_query(F.data.startswith("del_unl:"))
+async def handle_delete_unlinked(callback: types.CallbackQuery, bot: Bot):
+    _, code, page_str = callback.data.split(":")
+    page = int(page_str)
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, file_id, _, _, _, archive_msg_id = order
+    await database.delete_order_by_code(code)
+    deleted = await services.delete_from_archive(bot, archive_msg_id)
+    await services.backup_database(bot, f"Удален материал без привязки (код: <code>{code}</code>)")
+    await callback.answer(f"Удалено из архива: {deleted}")
+    orders = await database.get_unlinked_orders()
+    if not orders:
+        await callback.message.edit_text(texts.UNLINKED_EMPTY)
+        return
+    markup, current_items, total_pages, actual_page, start_idx = keyboards.build_unlinked_keyboard(orders, page)
+    await callback.message.edit_text(texts.UNLINKED_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+# === Обработчики для всех медиа ===
+
+@router.callback_query(F.data.startswith("allm_opt:"))
+async def handle_all_media_options(callback: types.CallbackQuery):
+    _, code, page_str = callback.data.split(":")
+    page = int(page_str)
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, _, _, title, media_type, _ = order
+    media_title = title if title else "Без названия"
+    markup = keyboards.build_all_media_actions_keyboard(code, page)
+    text = f"🗂 <b>{media_title}</b>\n\nВыбери действие:"
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("allm_p:"))
+async def handle_all_media_pagination(callback: types.CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    media_list = await database.get_all_unique_media()
+    if not media_list:
+        await callback.message.edit_text(texts.ALL_MEDIA_EMPTY)
+        await callback.answer()
+        return
+    markup, current_items, total_pages, actual_page, start_idx = keyboards.build_all_media_keyboard(media_list, page)
+    await callback.message.edit_text(texts.ALL_MEDIA_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("view_allm:"))
+async def handle_view_all_media(callback: types.CallbackQuery, bot: Bot):
+    code = callback.data.split(":")[1]
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, file_id, _, title, media_type, _ = order
+    await callback.answer()
+    await services.send_protected_media(
+        bot,
+        chat_id=callback.message.chat.id,
+        file_id=file_id,
+        media_type=media_type,
+        title=title,
+        reply_markup=keyboards.get_admin_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("newlink_allm:"))
+async def handle_create_link_all_media(callback: types.CallbackQuery, bot: Bot):
+    _, code, page_str = callback.data.split(":")
+    page = int(page_str)
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, file_id, _, title, media_type, archive_msg_id = order
+    media_title = title if title else "Без названия"
+    new_code = await database.create_order(file_id, media_title, media_type, archive_msg_id)
+    m_name = "видео" if media_type == "video" else "фото"
+    await services.backup_database(bot, f"Создана новая ссылка для {m_name} «{media_title}» (код: <code>{new_code}</code>)")
+    bot_info = await bot.get_me()
+    deep_link = f"https://t.me/{bot_info.username}?start={new_code}"
+    reply_text = texts.admin_new_link_created(new_code, deep_link, media_title, media_type)
+    await callback.message.answer(reply_text, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
+    await callback.answer(texts.NEW_LINK_UNLINKED_SUCCESS)
+
+@router.callback_query(F.data.startswith("del_allm:"))
+async def handle_delete_all_media(callback: types.CallbackQuery, bot: Bot):
+    _, code, page_str = callback.data.split(":")
+    page = int(page_str)
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, file_id, _, _, _, _ = order
+    archive_ids = await database.delete_all_orders_by_file_id(file_id)
+    deleted = 0
+    for aid_str in archive_ids:
+        deleted += await services.delete_from_archive(bot, aid_str)
+    await services.backup_database(bot, f"Удален материал из всех записей")
+    await callback.answer(f"Удалено из архива: {deleted}")
+    media_list = await database.get_all_unique_media()
+    if not media_list:
+        await callback.message.edit_text(texts.ALL_MEDIA_EMPTY)
+        return
+    markup, current_items, total_pages, actual_page, start_idx = keyboards.build_all_media_keyboard(media_list, page)
+    await callback.message.edit_text(texts.ALL_MEDIA_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)

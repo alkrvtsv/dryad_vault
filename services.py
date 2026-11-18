@@ -61,9 +61,10 @@ async def register_or_update_user(bot: Bot, user: types.User):
     elif status == "UPDATED":
         await backup_database(bot, f"Обновлен юзернейм заказчика: {user_ref} (ID: <code>{user.id}</code>)")
 
-async def backup_and_get_file_id(bot: Bot, file_id: str, media_type: str, title: str|None=None) -> str:
+async def backup_and_get_file_id(bot: Bot, file_id: str, media_type: str, title: str|None=None) -> tuple[str, int|None]:
+    """Сохраняет файл в архив и возвращает (новый_file_id, archive_message_id)."""
     if not ARCHIVE_CHANNEL_ID:
-        return file_id
+        return file_id, None
     try:
         icon = "📦 🎬" if media_type == "video" else "📦 🖼"
         caption = f"{icon} <b>{title}</b>" if title else f"{icon} <b>Архив</b>"
@@ -74,10 +75,9 @@ async def backup_and_get_file_id(bot: Bot, file_id: str, media_type: str, title:
                 caption=caption,
                 parse_mode=ParseMode.HTML
             )
-            # Если тестовый режим активен, сохраняем ID сообщения для удаления
             if config.TEST_MODE:
                 config.TEST_ARCHIVED_MESSAGES.append((ARCHIVE_CHANNEL_ID, archived_msg.message_id))
-            return archived_msg.video.file_id
+            return archived_msg.video.file_id, archived_msg.message_id
         else:
             archived_msg = await bot.send_photo(
                 chat_id=ARCHIVE_CHANNEL_ID,
@@ -85,17 +85,16 @@ async def backup_and_get_file_id(bot: Bot, file_id: str, media_type: str, title:
                 caption=caption,
                 parse_mode=ParseMode.HTML
             )
-            # Если тестовый режим активен, сохраняем ID сообщения для удаления
             if config.TEST_MODE:
                 config.TEST_ARCHIVED_MESSAGES.append((ARCHIVE_CHANNEL_ID, archived_msg.message_id))
-            return archived_msg.photo[-1].file_id
+            return archived_msg.photo[-1].file_id, archived_msg.message_id
     except Exception:
-        return file_id
+        return file_id, None
 
-async def backup_and_get_album_file_ids(bot: Bot, file_ids: list[str], media_types: list[str], title: str|None=None) -> str:
-    """Сохраняет альбом в архив и возвращает JSON-строку с новыми file_id."""
+async def backup_and_get_album_file_ids(bot: Bot, file_ids: list[str], media_types: list[str], title: str|None=None) -> tuple[str, list[int]]:
+    """Сохраняет альбом в архив и возвращает (json_str, [archive_message_ids])."""
     if not ARCHIVE_CHANNEL_ID:
-        return json.dumps([{"id": fid, "type": m_type} for fid, m_type in zip(file_ids, media_types)])
+        return json.dumps([{"id": fid, "type": m_type} for fid, m_type in zip(file_ids, media_types)]), []
     try:
         from aiogram.types import InputMediaPhoto, InputMediaVideo
         media_group = []
@@ -110,9 +109,10 @@ async def backup_and_get_album_file_ids(bot: Bot, file_ids: list[str], media_typ
             media=media_group
         )
         
-        # Если тестовый режим активен, сохраняем ID сообщений для удаления
-        if config.TEST_MODE:
-            for msg in archived_msgs:
+        archive_message_ids = []
+        for msg in archived_msgs:
+            archive_message_ids.append(msg.message_id)
+            if config.TEST_MODE:
                 config.TEST_ARCHIVED_MESSAGES.append((ARCHIVE_CHANNEL_ID, msg.message_id))
         
         new_media_list = []
@@ -121,10 +121,27 @@ async def backup_and_get_album_file_ids(bot: Bot, file_ids: list[str], media_typ
                 new_media_list.append({"id": m.video.file_id, "type": "video"})
             else:
                 new_media_list.append({"id": m.photo[-1].file_id, "type": "photo"})
-        return json.dumps(new_media_list)
+        return json.dumps(new_media_list), archive_message_ids
     except Exception as e:
         logging.error(f"Album backup failed: {e}")
-        return json.dumps([{"id": fid, "type": m_type} for fid, m_type in zip(file_ids, media_types)])
+        return json.dumps([{"id": fid, "type": m_type} for fid, m_type in zip(file_ids, media_types)]), []
+
+async def delete_from_archive(bot: Bot, archive_message_id_str: str|None) -> int:
+    """Удаляет сообщения из архива по списку ID (строка через запятую). Возвращает количество удаленных."""
+    if not ARCHIVE_CHANNEL_ID or not archive_message_id_str:
+        return 0
+    deleted = 0
+    try:
+        ids = [int(x.strip()) for x in archive_message_id_str.split(",") if x.strip()]
+        for msg_id in ids:
+            try:
+                await bot.delete_message(chat_id=ARCHIVE_CHANNEL_ID, message_id=msg_id)
+                deleted += 1
+            except Exception as e:
+                logging.error(f"Не удалось удалить сообщение {msg_id} из архива: {e}")
+    except Exception as e:
+        logging.error(f"Ошибка парсинга archive_message_id: {e}")
+    return deleted
 
 async def send_protected_media(
     bot: Bot,
@@ -134,6 +151,7 @@ async def send_protected_media(
     title: str|None=None,
     reply_markup=None
 ):
+    """Отправляет защищенный материал пользователю и отслеживает его в тестовом режиме."""
     if media_type == "album":
         try:
             media_list = json.loads(file_id)
@@ -158,28 +176,39 @@ async def send_protected_media(
                     parse_mode=ParseMode.HTML
                 ))
         
-        await bot.send_media_group(
+        sent_msgs = await bot.send_media_group(
             chat_id=chat_id,
             media=media_group,
             protect_content=True
         )
+        
+        if config.TEST_MODE:
+            for msg in sent_msgs:
+                config.TEST_SENT_MESSAGES.append((chat_id, msg.message_id))
+        
         if reply_markup:
-            await bot.send_message(
+            menu_msg = await bot.send_message(
                 chat_id=chat_id, 
                 text="⬇️ Меню:", 
                 reply_markup=reply_markup
             )
+            if config.TEST_MODE:
+                config.TEST_SENT_MESSAGES.append((chat_id, menu_msg.message_id))
             
     elif media_type == "video":
-        await bot.send_video(
+        sent_msg = await bot.send_video(
             chat_id=chat_id, video=file_id, caption=texts.media_caption(title),
             protect_content=True, parse_mode=ParseMode.HTML, reply_markup=reply_markup
         )
+        if config.TEST_MODE:
+            config.TEST_SENT_MESSAGES.append((chat_id, sent_msg.message_id))
     else:
-        await bot.send_photo(
+        sent_msg = await bot.send_photo(
             chat_id=chat_id, photo=file_id, caption=texts.media_caption(title),
             protect_content=True, parse_mode=ParseMode.HTML, reply_markup=reply_markup
         )
+        if config.TEST_MODE:
+            config.TEST_SENT_MESSAGES.append((chat_id, sent_msg.message_id))
 
 async def notify_admin(bot: Bot, code: str, user: types.User, title: str|None=None, media_type: str="video"):
     msg = texts.admin_order_activated(
@@ -209,17 +238,13 @@ async def enable_test_mode(bot: Bot) -> bool:
         return False
     
     try:
-        # Создаем бэкап базы данных
         if os.path.exists(DB_NAME):
             shutil.copy2(DB_NAME, TEST_BACKUP_PATH)
         
-        # Очищаем список архивных сообщений
         config.TEST_ARCHIVED_MESSAGES.clear()
-        
-        # Устанавливаем флаг тестового режима
+        config.TEST_SENT_MESSAGES.clear()
         config.TEST_MODE = True
         
-        # Логируем действие
         await backup_database(bot, "🧪 Включен режим тестирования")
         
         return True
@@ -228,34 +253,45 @@ async def enable_test_mode(bot: Bot) -> bool:
         return False
 
 async def disable_test_mode(bot: Bot) -> bool:
-    """Отключает режим тестирования, восстанавливает БД и удаляет тестовые материалы из архива."""
+    """Отключает режим тестирования, восстанавливает БД и удаляет тестовые материалы."""
     if not config.TEST_MODE:
         return False
     
     try:
-        # Удаляем все материалы из архивного канала, загруженные во время теста
-        deleted_count = 0
+        # 1. Удаляем материалы из архивного канала
+        archive_deleted = 0
         for chat_id, message_id in config.TEST_ARCHIVED_MESSAGES:
             try:
                 await bot.delete_message(chat_id=chat_id, message_id=message_id)
-                deleted_count += 1
+                archive_deleted += 1
             except Exception as e:
                 logging.error(f"Не удалось удалить сообщение {message_id} из архива: {e}")
+        
+        # 2. Удаляем материалы, отправленные пользователям
+        user_deleted = 0
+        for chat_id, message_id in config.TEST_SENT_MESSAGES:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+                user_deleted += 1
+            except Exception as e:
+                logging.error(f"Не удалось удалить сообщение {message_id} у пользователя: {e}")
         
         # Восстанавливаем базу данных из бэкапа
         if os.path.exists(TEST_BACKUP_PATH):
             shutil.copy2(TEST_BACKUP_PATH, DB_NAME)
             os.remove(TEST_BACKUP_PATH)
         
-        # Снимаем флаг тестового режима и очищаем список
         config.TEST_MODE = False
         config.TEST_ARCHIVED_MESSAGES.clear()
+        config.TEST_SENT_MESSAGES.clear()
         
-        # Логируем действие (уже в восстановленную БД не попадет, т.к. файл восстановлен)
-        # Просто отправляем уведомление админу
         await bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"✅ Режим тестирования завершен. Удалено материалов из архива: {deleted_count}"
+            text=(
+                f"✅ Режим тестирования завершен.\n"
+                f"🗑 Удалено из архива: {archive_deleted}\n"
+                f"🗑 Удалено у пользователей: {user_deleted}"
+            )
         )
         
         return True

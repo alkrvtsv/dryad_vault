@@ -23,25 +23,20 @@ async def handle_noop(callback: types.CallbackQuery):
 async def handle_deep_link(message: types.Message, command: CommandObject, state: FSMContext, bot: Bot):
     await state.clear()
     await services.register_or_update_user(bot, message.from_user)
-    
     code = command.args.strip()
     keyboard = keyboards.get_user_keyboard(message.from_user.id)
     file_id, title, media_type, status = await database.redeem_code(code, message.from_user.id)
-    
     if status == "NOT_FOUND":
         await message.answer(texts.ERR_CODE_NOT_FOUND_LINK, reply_markup=keyboard)
         return
     if status == "USED_BY_OTHER":
         await message.answer(texts.ERR_USED_BY_OTHER, reply_markup=keyboard)
         return
-        
     await message.answer(texts.MEDIA_LOADING, reply_markup=keyboard)
     await services.send_protected_media(bot, message.chat.id, file_id, media_type, title, reply_markup=keyboard)
-
     user_ref = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
     media_title = title or "Без названия"
     m_name = "видео" if media_type == "video" else "фото"
-
     if status == "SUCCESS":
         await services.backup_database(bot, f"Заказчик {user_ref} активировал ссылку ({m_name} «{media_title}», код: <code>{code}</code>)")
         await services.notify_admin(bot, code, message.from_user, title, media_type)
@@ -58,12 +53,10 @@ async def handle_regular_start(message: types.Message, state: FSMContext, bot: B
 async def process_history_button(message: types.Message, state: FSMContext, bot: Bot):
     await state.clear()
     await services.register_or_update_user(bot, message.from_user)
-    
     orders = await database.get_user_orders(message.from_user.id)
     if not orders:
         await message.answer(texts.HISTORY_EMPTY, reply_markup=keyboards.get_client_keyboard())
         return
-    
     markup = keyboards.build_client_history_keyboard(orders, page=1)
     await message.answer(texts.CLIENT_HISTORY_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
 
@@ -80,7 +73,6 @@ async def handle_client_history_pagination(callback: types.CallbackQuery):
         await callback.message.edit_text(texts.HISTORY_EMPTY)
         await callback.answer()
         return
-    
     markup = keyboards.build_client_history_keyboard(orders, page=page)
     await callback.message.edit_reply_markup(reply_markup=markup)
     await callback.answer()
@@ -92,8 +84,7 @@ async def handle_client_video_click(callback: types.CallbackQuery, bot: Bot):
     if not order or order[2] != callback.from_user.id:
         await callback.answer("Материал не найден или недоступен", show_alert=True)
         return
-    
-    _, file_id, _, title, media_type = order
+    _, file_id, _, title, media_type, _ = order
     await callback.answer()
     await services.send_protected_media(
         bot,
@@ -108,26 +99,20 @@ async def handle_client_video_click(callback: types.CallbackQuery, bot: Bot):
 async def process_code_input(message: types.Message, state: FSMContext, bot: Bot):
     await services.register_or_update_user(bot, message.from_user)
     text = message.text.strip()
-    
     if text == texts.BUTTON_GET_VIDEO:
         await message.answer(texts.CLIENT_ASK_CODE, reply_markup=keyboards.get_client_keyboard())
         return
-        
     if text == texts.BUTTON_HISTORY:
         await process_history_button(message, state, bot)
         return
-
     file_id, title, media_type, status = await database.redeem_code(text, message.from_user.id)
     await state.clear()
-    
     if status == "NOT_FOUND":
         await message.answer(texts.ERR_CODE_NOT_FOUND, reply_markup=keyboards.get_client_keyboard())
         return
-        
     if status == "USED_BY_OTHER":
         await message.answer(texts.ERR_USED_BY_OTHER, reply_markup=keyboards.get_client_keyboard())
         return
-    
     await message.answer(texts.MEDIA_LOADING, reply_markup=keyboards.get_client_keyboard())
     await services.send_protected_media(
         bot,
@@ -137,11 +122,9 @@ async def process_code_input(message: types.Message, state: FSMContext, bot: Bot
         title,
         reply_markup=keyboards.get_client_keyboard()
     )
-
     user_ref = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
     media_title = title or "Без названия"
     m_name = "видео" if media_type == "video" else "фото"
-
     if status == "SUCCESS":
         await services.backup_database(bot, f"Заказчик {user_ref} ввёл код вручную ({m_name} «{media_title}», код: <code>{text}</code>)")
         await services.notify_admin(bot, text, message.from_user, title, media_type)

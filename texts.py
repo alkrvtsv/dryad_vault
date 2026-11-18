@@ -4,6 +4,7 @@ BUTTON_UPLOAD = "📤 Создать ссылку"
 BUTTON_ASSIGN_DIRECT = "📎 Привязать к ID"
 BUTTON_CUSTOMERS_LIST = "👥 Список заказчиков"
 BUTTON_CANCEL = "❌ Отмена"
+BUTTON_TEST = "🧪 Тест"
 
 CLIENT_START = (
     "Привет! ✨\n\n"
@@ -76,6 +77,16 @@ USER_UPDATE_FAILED = "Не удалось обновить: пользовате
 ADMIN_PROMPT_RENAME = "Напиши новое название:"
 ADMIN_RENAME_SUCCESS = "✅ Название успешно обновлено!"
 NEW_LINK_SUCCESS = "Новая ссылка создана!"
+
+TECH_WORKS_MESSAGE = "🔧 Ведутся технические работы. Бот временно недоступен."
+
+TEST_MODE_ENABLED = "🧪 <b>Режим тестирования включен!</b>\n\nБаза данных сохранена. Теперь вы можете тестировать любые функции. Все изменения будут отменены после повторного нажатия кнопки «🧪 Тест».\n\n<i>Обычные пользователи сейчас видят сообщение о тех. работах.</i>"
+
+TEST_MODE_DISABLED = "✅ <b>Режим тестирования завершен!</b>\n\nБаза данных восстановлена до состояния перед тестом. Все тестовые данные удалены."
+
+TEST_MODE_ALREADY_ACTIVE = "⚠️ Режим тестирования уже активен. Нажмите кнопку ещё раз, чтобы завершить тест."
+
+TEST_MODE_ALREADY_INACTIVE = "⚠️ Режим тестирования не активен."
 
 def media_manage_text(title: str, code: str, user_id: int, username: str|None, media_type: str) -> str:
     user_ref = f"@{username}" if username else f"ID: {user_id}"

@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+import shutil
 from datetime import datetime
 from aiogram import Bot, types
 from aiogram.enums import ParseMode
@@ -8,7 +9,8 @@ from aiogram.types import FSInputFile
 
 import database
 import texts
-from config import ADMIN_ID, ARCHIVE_CHANNEL_ID, DB_NAME
+from config import ADMIN_ID, ARCHIVE_CHANNEL_ID, DB_NAME, TEST_BACKUP_PATH
+import config
 
 def extract_media_info(message: types.Message) -> tuple[str, str, str|None]:
     """Возвращает (file_id, media_type, title)."""
@@ -188,3 +190,46 @@ async def sync_user_from_telegram(bot: Bot, user_id: int):
         return username, True
     except Exception:
         return None, False
+
+async def enable_test_mode(bot: Bot) -> bool:
+    """Включает режим тестирования. Возвращает True если успешно."""
+    if config.TEST_MODE:
+        return False
+    
+    try:
+        # Создаем бэкап базы данных
+        if os.path.exists(DB_NAME):
+            shutil.copy2(DB_NAME, TEST_BACKUP_PATH)
+        
+        # Устанавливаем флаг тестового режима
+        config.TEST_MODE = True
+        
+        # Логируем действие
+        await backup_database(bot, "🧪 Включен режим тестирования")
+        
+        return True
+    except Exception as e:
+        logging.error(f"Ошибка включения тестового режима: {e}")
+        return False
+
+async def disable_test_mode(bot: Bot) -> bool:
+    """Отключает режим тестирования и восстанавливает БД. Возвращает True если успешно."""
+    if not config.TEST_MODE:
+        return False
+    
+    try:
+        # Восстанавливаем базу данных из бэкапа
+        if os.path.exists(TEST_BACKUP_PATH):
+            shutil.copy2(TEST_BACKUP_PATH, DB_NAME)
+            os.remove(TEST_BACKUP_PATH)
+        
+        # Снимаем флаг тестового режима
+        config.TEST_MODE = False
+        
+        # Логируем действие
+        await backup_database(bot, "✅ Режим тестирования завершен, БД восстановлена")
+        
+        return True
+    except Exception as e:
+        logging.error(f"Ошибка отключения тестового режима: {e}")
+        return False

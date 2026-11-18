@@ -117,6 +117,26 @@ async def process_admin_cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(texts.ADMIN_ACTION_CANCELLED, reply_markup=keyboards.get_admin_keyboard())
 
+@router.message(F.text == texts.BUTTON_TEST)
+async def handle_test_mode(message: types.Message, bot: Bot):
+    """Обработчик кнопки тестового режима."""
+    import config
+    
+    if not config.TEST_MODE:
+        # Включаем тестовый режим
+        success = await services.enable_test_mode(bot)
+        if success:
+            await message.answer(texts.TEST_MODE_ENABLED, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
+        else:
+            await message.answer("❌ Ошибка включения тестового режима", reply_markup=keyboards.get_admin_keyboard())
+    else:
+        # Отключаем тестовый режим
+        success = await services.disable_test_mode(bot)
+        if success:
+            await message.answer(texts.TEST_MODE_DISABLED, reply_markup=keyboards.get_admin_keyboard(), parse_mode=ParseMode.HTML)
+        else:
+            await message.answer("❌ Ошибка отключения тестового режима", reply_markup=keyboards.get_admin_keyboard())
+
 @router.message(F.text == texts.BUTTON_UPLOAD)
 async def process_admin_upload_button(message: types.Message, state: FSMContext):
     await state.clear()

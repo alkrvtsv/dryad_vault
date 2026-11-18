@@ -13,4 +13,10 @@ if not BOT_TOKEN or not ADMIN_ID_RAW:
 
 ADMIN_ID = int(ADMIN_ID_RAW)
 ARCHIVE_CHANNEL_ID = int(ARCHIVE_CHANNEL_ID_RAW) if ARCHIVE_CHANNEL_ID_RAW else None
+
 PAGE_SIZE = 5
+
+# Настройки режима тестирования
+TEST_MODE = False
+TEST_BACKUP_PATH = DB_NAME + ".test_backup"
+TEST_ALLOWED_USER_ID = 7896647014

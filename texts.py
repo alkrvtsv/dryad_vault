@@ -14,6 +14,7 @@ BUTTON_LINK_USER = "👤 Привязать к ID"
 BUTTON_CREATE_LINK = "🔗 Создать ссылку"
 BUTTON_BACK_UNLINKED = "◀️ Назад к списку"
 BUTTON_BACK_ALL_MEDIA = "◀️ Назад к списку"
+BUTTON_WHO_HAS = "👥 Кто привязан"
 
 CLIENT_START = (
     "Привет! ✨\n\n"
@@ -95,7 +96,7 @@ UNLINKED_TITLE = "📦 <b>Материалы без привязки:</b>\n\nВ�
 UNLINKED_EMPTY = "Нет материалов без привязки."
 ALL_MEDIA_TITLE = "🗂 <b>Все медиа:</b>\n\nВыбери нужный для управления:"
 ALL_MEDIA_EMPTY = "Нет сохраненных медиа."
-UNLINK_SUCCESS = "✅ Материал отвязан от пользователя и перемещен в «Без привязки»."
+UNLINK_SUCCESS = "✅ Материал отвязан от пользователя."
 DELETE_FULL_SUCCESS = "✅ Материал полностью удален из архива."
 LINK_UNLINKED_PROMPT = "Напиши числовой Telegram ID заказчика, к которому нужно привязать этот материал:"
 LINK_UNLINKED_SUCCESS = "✅ Материал привязан к заказчику!"

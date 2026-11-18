@@ -156,22 +156,47 @@ async def delete_order_by_code(code: str):
         await db.execute("DELETE FROM orders WHERE code = ?", (code,))
         await db.commit()
 
-async def unlink_order(code: str):
-    """Отвязывает материал от пользователя, оставляя его в архиве."""
+async def unlink_order(code: str) -> str:
+    """Отвязывает материал. Если он ещё у кого-то есть — удаляет запись,
+    иначе помечает как 'без привязки'. Возвращает 'UNLINKED' или 'DELETED'."""
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE orders SET is_used = 0, used_by = NULL WHERE code = ?", (code,))
-        await db.commit()
+        cursor = await db.execute("SELECT file_id FROM orders WHERE code = ?", (code,))
+        row = await cursor.fetchone()
+        if not row:
+            return "NOT_FOUND"
+        file_id = row[0]
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM orders WHERE file_id = ? AND used_by IS NOT NULL AND code != ?",
+            (file_id, code)
+        )
+        others_count = (await cursor.fetchone())[0]
+        if others_count > 0:
+            await db.execute("DELETE FROM orders WHERE code = ?", (code,))
+            await db.commit()
+            return "DELETED"
+        else:
+            await db.execute("UPDATE orders SET is_used = 0, used_by = NULL WHERE code = ?", (code,))
+            await db.commit()
+            return "UNLINKED"
 
 async def get_unlinked_orders():
-    """Возвращает все материалы без привязки к пользователю."""
+    """Материалы без привязки. Показываем только те, у которых НЕТ ни одной
+    активной привязки к пользователю по тому же file_id."""
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute(
-            "SELECT code, file_id, title, COALESCE(media_type, 'video'), archive_message_id FROM orders WHERE used_by IS NULL AND is_used = 0 ORDER BY rowid DESC"
-        )
+        cursor = await db.execute("""
+            SELECT o.code, o.file_id, o.title, COALESCE(o.media_type, 'video'), o.archive_message_id
+            FROM orders o
+            WHERE o.used_by IS NULL AND o.is_used = 0
+            AND NOT EXISTS (
+                SELECT 1 FROM orders o2
+                WHERE o2.file_id = o.file_id AND o2.used_by IS NOT NULL
+            )
+            ORDER BY o.rowid DESC
+        """)
         return await cursor.fetchall()
 
 async def get_all_unique_media():
-    """Возвращает все уникальные медиа, сгруппированные по file_id."""
+    """Все уникальные медиа, сгруппированные по file_id."""
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("""
             SELECT MIN(code) as code, file_id, MIN(title) as title, COALESCE(MIN(media_type), 'video') as media_type, COUNT(*) as order_count
@@ -181,8 +206,20 @@ async def get_all_unique_media():
         """)
         return await cursor.fetchall()
 
+async def get_material_owners(file_id: str):
+    """Возвращает список пользователей, у которых есть данный материал."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute("""
+            SELECT o.used_by, u.username
+            FROM orders o
+            LEFT JOIN users u ON o.used_by = u.user_id
+            WHERE o.file_id = ? AND o.used_by IS NOT NULL
+            ORDER BY o.rowid DESC
+        """, (file_id,))
+        return await cursor.fetchall()
+
 async def delete_all_orders_by_file_id(file_id: str) -> list[str]:
-    """Удаляет все записи с данным file_id и возвращает список archive_message_id для удаления из архива."""
+    """Удаляет все записи с данным file_id и возвращает список archive_message_id."""
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT archive_message_id FROM orders WHERE file_id = ?", (file_id,))
         rows = await cursor.fetchall()

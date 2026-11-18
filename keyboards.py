@@ -193,6 +193,7 @@ def build_unlinked_actions_keyboard(code: str, page: int):
 def build_all_media_actions_keyboard(code: str, page: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=texts.BUTTON_VIEW_MEDIA, callback_data=f"view_allm:{code}")],
+        [InlineKeyboardButton(text=texts.BUTTON_WHO_HAS, callback_data=f"who_allm:{code}:{page}")],
         [InlineKeyboardButton(text=texts.BUTTON_CREATE_LINK, callback_data=f"newlink_allm:{code}:{page}")],
         [InlineKeyboardButton(text=texts.BUTTON_DELETE_FULL, callback_data=f"del_allm:{code}:{page}")],
         [InlineKeyboardButton(text=texts.BUTTON_BACK_ALL_MEDIA, callback_data=f"allm_p:{page}")]

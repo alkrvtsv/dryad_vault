@@ -719,3 +719,28 @@ async def handle_delete_all_media(callback: types.CallbackQuery, bot: Bot):
         return
     markup, current_items, total_pages, actual_page, start_idx = keyboards.build_all_media_keyboard(media_list, page)
     await callback.message.edit_text(texts.ALL_MEDIA_TITLE, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+@router.callback_query(F.data.startswith("who_allm:"))
+async def handle_who_has_media(callback: types.CallbackQuery):
+    _, code, page_str = callback.data.split(":")
+    page = int(page_str)
+    order = await database.get_order_by_code(code)
+    if not order:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+    _, file_id, _, title, _, _ = order
+    owners = await database.get_material_owners(file_id)
+    media_title = title if title else "Без названия"
+    if not owners:
+        text = f"Материал «{media_title}» ни к кому не привязан."
+    else:
+        lines = []
+        for uid, uname in owners:
+            ref = f"@{uname}" if uname else f"ID: {uid}"
+            lines.append(f"• {ref}")
+        text = f"👥 <b>Кому доступен «{media_title}»:</b>\n\n" + "\n".join(lines)
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=texts.BUTTON_BACK_ALL_MEDIA, callback_data=f"allm_opt:{code}:{page}")]
+    ])
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+    await callback.answer()

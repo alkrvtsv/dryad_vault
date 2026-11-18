@@ -2,6 +2,7 @@ import os
 import logging
 import json
 import shutil
+import asyncio
 from datetime import datetime
 from aiogram import Bot, types
 from aiogram.enums import ParseMode
@@ -9,7 +10,10 @@ from aiogram.types import FSInputFile
 
 import database
 import texts
-from config import ADMIN_ID, ARCHIVE_CHANNEL_ID, DB_NAME, TEST_BACKUP_PATH
+from config import (
+    ADMIN_ID, ARCHIVE_CHANNEL_ID, DB_NAME, TEST_BACKUP_PATH,
+    BACKUP_RETENTION_COUNT, BACKUP_INTERVAL_SECONDS, BACKUP_META_PATH
+)
 import config
 
 def extract_media_info(message: types.Message) -> tuple[str, str, str|None]:
@@ -32,26 +36,125 @@ def extract_media_info(message: types.Message) -> tuple[str, str, str|None]:
         return file_id, media_type, title
     raise ValueError("Message contains neither video nor photo")
 
+
+# ============================================================
+# Учёт бэкапов: мета-файл, отложенная отправка, ретенция
+# ============================================================
+
+def _load_backup_meta() -> dict:
+    """Читает мета-файл учёта бэкапов."""
+    if os.path.exists(BACKUP_META_PATH):
+        try:
+            with open(BACKUP_META_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                data.setdefault("pending_actions", [])
+                data.setdefault("backups", [])
+                return data
+        except Exception:
+            pass
+    return {"pending_actions": [], "backups": []}
+
+def _save_backup_meta(meta: dict):
+    """Сохраняет мета-файл учёта бэкапов."""
+    try:
+        with open(BACKUP_META_PATH, 'w', encoding='utf-8') as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"Не удалось сохранить мета-файл бэкапов: {e}")
+
 async def backup_database(bot: Bot, description: str):
-    if not ARCHIVE_CHANNEL_ID or not os.path.exists(DB_NAME):
+    """Больше НЕ отправляет бэкап сразу.
+    Лишь фиксирует, что произошло изменение, и добавляет описание в список.
+    Реальный бэкап сделает планировщик раз в час, если были изменения."""
+    if not ARCHIVE_CHANNEL_ID:
         return
+    if config.TEST_MODE:
+        return
+    meta = _load_backup_meta()
+    meta["pending_actions"].append(description)
+    _save_backup_meta(meta)
+
+async def flush_backup_if_dirty(bot: Bot):
+    """Если были изменения — отправляет один бэкап со списком действий и чистит старые."""
+    if config.TEST_MODE:
+        return
+    if not ARCHIVE_CHANNEL_ID:
+        return
+    meta = _load_backup_meta()
+    pending = meta.get("pending_actions", [])
+    if not pending:
+        return  # изменений не было — бэкап не нужен
+    if not os.path.exists(DB_NAME):
+        return
+
     now_str = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Формируем список действий, не вылезая за лимит подписи
+    MAX_ACTIONS_CHARS = 700
+    actions_text = ""
+    count_shown = 0
+    for i, act in enumerate(pending, start=1):
+        line = f"{i}. {act}\n"
+        if len(actions_text) + len(line) > MAX_ACTIONS_CHARS:
+            break
+        actions_text += line
+        count_shown += 1
+    if len(pending) > count_shown:
+        actions_text += f"… и ещё {len(pending) - count_shown} изменений"
+    if not actions_text:
+        actions_text = f"Изменений: {len(pending)}"
+
     caption = (
-        f"💾 <b>Резервная копия базы данных</b>\n\n"
-        f"📌 <b>Действие:</b> {description}\n"
+        f"💾 <b>Резервная копия базы данных</b>\n"
+        f"📋 <b>Изменений с последнего бэкапа:</b> {len(pending)}\n\n"
+        f"{actions_text}\n"
         f"🕒 <b>Время:</b> <code>{now_str}</code>"
     )
+
     try:
         doc = FSInputFile(DB_NAME, filename=f"asmr_orders_{file_timestamp}.db")
-        await bot.send_document(
+        sent = await bot.send_document(
             chat_id=ARCHIVE_CHANNEL_ID,
             document=doc,
             caption=caption,
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
-        logging.error(f"Не удалось отправить бэкап базы данных: {e}")
+        logging.error(f"Не удалось отправить бэкап: {e}")
+        return  # pending сохраняем, попробуем в следующий раз
+
+    # Записываем бэкап в реестр и очищаем список действий
+    meta["backups"].append({
+        "message_id": sent.message_id,
+        "created_at": now_str,
+        "actions_count": len(pending)
+    })
+    meta["pending_actions"] = []
+
+    # Ретенция: оставляем только последние BACKUP_RETENTION_COUNT
+    while len(meta["backups"]) > BACKUP_RETENTION_COUNT:
+        oldest = meta["backups"].pop(0)
+        try:
+            await bot.delete_message(chat_id=ARCHIVE_CHANNEL_ID, message_id=oldest["message_id"])
+        except Exception as e:
+            logging.error(f"Не удалось удалить старый бэкап {oldest['message_id']}: {e}")
+
+    _save_backup_meta(meta)
+
+async def run_backup_scheduler(bot: Bot):
+    """Фоновая задача: раз в час проверяет, нужны ли бэкап."""
+    while True:
+        try:
+            await flush_backup_if_dirty(bot)
+        except Exception as e:
+            logging.error(f"Ошибка планировщика бэкапов: {e}")
+        await asyncio.sleep(BACKUP_INTERVAL_SECONDS)
+
+
+# ============================================================
+# Архив медиа и остальные сервисы (без изменений логики)
+# ============================================================
 
 async def register_or_update_user(bot: Bot, user: types.User):
     status = await database.save_user(user.id, user.username)
@@ -127,7 +230,7 @@ async def backup_and_get_album_file_ids(bot: Bot, file_ids: list[str], media_typ
         return json.dumps([{"id": fid, "type": m_type} for fid, m_type in zip(file_ids, media_types)]), []
 
 async def delete_from_archive(bot: Bot, archive_message_id_str: str|None) -> int:
-    """Удаляет сообщения из архива по списку ID (строка через запятую). Возвращает количество удаленных."""
+    """Удаляет сообщения из архива по списку ID (строка через запятую). Возвращает количество удалённых."""
     if not ARCHIVE_CHANNEL_ID or not archive_message_id_str:
         return 0
     deleted = 0
@@ -151,6 +254,7 @@ async def send_protected_media(
     title: str|None=None,
     reply_markup=None
 ):
+    """Отправляет защищённый материал пользователю и отслеживает его в тестовом режиме."""
     if media_type == "album":
         try:
             media_list = json.loads(file_id)
@@ -184,6 +288,15 @@ async def send_protected_media(
         if config.TEST_MODE:
             for msg in sent_msgs:
                 config.TEST_SENT_MESSAGES.append((chat_id, msg.message_id))
+        
+        if reply_markup:
+            menu_msg = await bot.send_message(
+                chat_id=chat_id, 
+                text="⬇️ Меню:", 
+                reply_markup=reply_markup
+            )
+            if config.TEST_MODE:
+                config.TEST_SENT_MESSAGES.append((chat_id, menu_msg.message_id))
             
     elif media_type == "video":
         sent_msg = await bot.send_video(
@@ -222,21 +335,21 @@ async def sync_user_from_telegram(bot: Bot, user_id: int):
     except Exception:
         return None, False
 
+
+# ============================================================
+# Режим тестирования
+# ============================================================
+
 async def enable_test_mode(bot: Bot) -> bool:
     """Включает режим тестирования. Возвращает True если успешно."""
     if config.TEST_MODE:
         return False
-    
     try:
         if os.path.exists(DB_NAME):
             shutil.copy2(DB_NAME, TEST_BACKUP_PATH)
-        
         config.TEST_ARCHIVED_MESSAGES.clear()
         config.TEST_SENT_MESSAGES.clear()
         config.TEST_MODE = True
-        
-        await backup_database(bot, "🧪 Включен режим тестирования")
-        
         return True
     except Exception as e:
         logging.error(f"Ошибка включения тестового режима: {e}")
@@ -246,9 +359,7 @@ async def disable_test_mode(bot: Bot) -> bool:
     """Отключает режим тестирования, восстанавливает БД и удаляет тестовые материалы."""
     if not config.TEST_MODE:
         return False
-    
     try:
-        # 1. Удаляем материалы из архивного канала
         archive_deleted = 0
         for chat_id, message_id in config.TEST_ARCHIVED_MESSAGES:
             try:
@@ -257,7 +368,6 @@ async def disable_test_mode(bot: Bot) -> bool:
             except Exception as e:
                 logging.error(f"Не удалось удалить сообщение {message_id} из архива: {e}")
         
-        # 2. Удаляем материалы, отправленные пользователям
         user_deleted = 0
         for chat_id, message_id in config.TEST_SENT_MESSAGES:
             try:
@@ -266,7 +376,6 @@ async def disable_test_mode(bot: Bot) -> bool:
             except Exception as e:
                 logging.error(f"Не удалось удалить сообщение {message_id} у пользователя: {e}")
         
-        # Восстанавливаем базу данных из бэкапа
         if os.path.exists(TEST_BACKUP_PATH):
             shutil.copy2(TEST_BACKUP_PATH, DB_NAME)
             os.remove(TEST_BACKUP_PATH)
@@ -283,7 +392,6 @@ async def disable_test_mode(bot: Bot) -> bool:
                 f"🗑 Удалено у пользователей: {user_deleted}"
             )
         )
-        
         return True
     except Exception as e:
         logging.error(f"Ошибка отключения тестового режима: {e}")

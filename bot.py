@@ -5,6 +5,7 @@ from aiogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeCha
 from aiogram.exceptions import TelegramBadRequest
 from config import BOT_TOKEN, ADMIN_ID
 import database
+import services
 from handlers import admin, client
 
 logging.basicConfig(level=logging.INFO)
@@ -24,9 +25,7 @@ async def errors_handler(event: ErrorEvent):
     """Глобальный обработчик ошибок. Глушит безвредные 'не модифицированные' правки."""
     exc = event.exception
     if isinstance(exc, TelegramBadRequest) and "message is not modified" in str(exc):
-        # Ничего страшного: контент сообщения не изменился
         return
-    # Остальные ошибки логируем
     logging.error(f"Ошибка при обработке апдейта: {exc}", exc_info=exc)
 
 async def main():
@@ -37,6 +36,8 @@ async def main():
     await setup_bot_commands(bot)
     dp.include_router(admin.router)
     dp.include_router(client.router)
+    # Запускаем фоновый планировщик бэкапов
+    asyncio.create_task(services.run_backup_scheduler(bot))
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

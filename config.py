@@ -25,3 +25,8 @@ TEST_ARCHIVED_MESSAGES = []
 
 # Список сообщений с материалами, отправленных пользователям во время теста: [(chat_id, message_id), ...]
 TEST_SENT_MESSAGES = []
+
+# Настройки бэкапов базы данных
+BACKUP_RETENTION_COUNT = 10          # сколько последних бэкапов хранить в архиве
+BACKUP_INTERVAL_SECONDS = 3600       # как часто проверять необходимость бэкапа (раз в час)
+BACKUP_META_PATH = DB_NAME.rsplit(".", 1)[0] + "_backup_meta.json"  # файл учёта бэкапов
